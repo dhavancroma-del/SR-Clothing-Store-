@@ -1,0 +1,23 @@
+{
+  "name": "sr-clothing",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A considered fashion storefront and owner-only SR CLOTHING business studio.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "create-owner": "node scripts/create-owner.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {}
+}

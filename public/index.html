@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#171713">
+  <meta name="description" content="SR CLOTHING: premium fashion, timeless designs, and everyday luxury. Thoughtfully chosen. Happily worn.">
+  <title>SR CLOTHING — Style That Defines You</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;450;500;550;600;650;700&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="studio.css">
+  <link rel="stylesheet" href="responsive.css">
+</head>
+<body>
+  <div class="announcement">A little more considered. A little less ordinary. <span>Complimentary shipping on orders over ₹2,999</span></div>
+  <header class="topbar">
+    <button class="icon-button mobile-menu-button" id="mobile-menu-button" aria-label="Open navigation"><span class="menu-lines"></span></button>
+    <a class="wordmark" href="#" id="home-link" aria-label="SR Clothing home"><span class="brand-seal">S<span>R</span></span><span>SR <span class="wordmark-light">CLOTHING</span><small>CONSIDERED STYLE SINCE 2021</small></span></a>
+    <nav class="main-nav" id="main-nav" aria-label="Main navigation">
+      <a href="#shop" data-filter="All">Home</a><a href="#shop" data-filter="Men">Men</a><a href="#shop" data-filter="Women">Women</a><a href="#shop" data-filter="New arrivals">New arrivals</a><a href="#shop" data-filter="All">Collections</a><a href="#shop" data-filter="New arrivals">Offers</a><a href="#story">About us</a><a href="#newsletter">Contact</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-button" id="search-button" aria-label="Search products"><svg viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.5"></circle><path d="m16 16 4 4"></path></svg></button>
+      <button class="icon-button wishlist-header" id="wishlist-button" aria-label="View wishlist"><svg viewBox="0 0 24 24"><path d="M20.8 8.8c0 5-8.8 10-8.8 10s-8.8-5-8.8-10a4.6 4.6 0 0 1 8.8-2 4.6 4.6 0 0 1 8.8 2Z"></path></svg></button>
+      <button class="icon-button cart-header" id="cart-button" aria-label="Open shopping bag"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1 13H6L5 8Z"></path><path d="M9 9V6a3 3 0 0 1 6 0v3"></path></svg><span class="cart-count" id="cart-count">0</span></button>
+      <button class="admin-link" id="admin-toggle"><span class="admin-dot"></span> THE STUDIO</button>
+    </div>
+  </header>
+
+  <main id="store-view">
+    <section class="hero">
+      <div class="hero-copy"><span class="eyebrow light-eyebrow"><span class="gold-rule"></span> THE EVERYDAY EDIT · VOL. 04</span><h1>Style that<br>defines <i>you.</i></h1><p>Discover premium fashion, timeless designs, and everyday luxury.</p><div class="hero-buttons"><a class="button button-gold" href="#shop">Shop now <span>↗</span></a><a class="text-link-light" href="#story">Explore collections <span>↗</span></a></div><div class="hero-foot"><span>01 — THOUGHTFUL BY DESIGN</span><span class="hero-slider">● <span>○</span> ○</span></div></div>
+      <div class="hero-photo" role="img" aria-label="A thoughtfully styled neutral-toned autumn outfit"><div class="photo-note"><span>THE SLOW<br>HOURS COLLECTION</span><span class="note-arrow">↗</span></div><div class="hero-photo-index">IMAGE 01 / 03</div></div>
+      <div class="hero-side-note">INDEPENDENT SPIRIT, ALWAYS. &nbsp; · &nbsp; MADE TO BE WORN, NOT JUST LOOKED AT.</div>
+    </section> 
+
+    <section class="category-strip" aria-label="Shop categories">
+      <a class="category-card cat-men" href="#shop" data-filter="Men"><span>THE GENTLEMAN'S EDIT</span><strong>For him<span class="category-arrow"> ↗</span></strong></a>
+      <a class="category-card cat-women" href="#shop" data-filter="Women"><span>THE WOMAN'S WARDROBE</span><strong>For her<span class="category-arrow"> ↗</span></strong></a>
+      <a class="category-card cat-objects" href="#shop" data-filter="Accessories"><span>THE FINISHING TOUCHES</span><strong>The details<span class="category-arrow"> ↗</span></strong></a>
+    </section>
+
+    <section class="collection-section page-section" id="shop">
+      <div class="section-heading"><div><span class="eyebrow"><span class="gold-rule"></span> A FEW GOOD THINGS</span><h2>Pieces to <i>keep.</i></h2><p class="section-subtitle">Chosen with intention. Worn on repeat.</p></div><a href="#shop" id="view-all" class="text-link">Browse everything <span>↗</span></a></div>
+      <div class="shop-toolbar"><div class="filter-pills" role="group" aria-label="Filter by category"><button class="filter-pill active" data-filter="All">Everything</button><button class="filter-pill" data-filter="Men">For him</button><button class="filter-pill" data-filter="Women">For her</button><button class="filter-pill" data-filter="Accessories">Accessories</button></div><label class="shop-search-wrap"><span aria-hidden="true">⌕</span><input id="shop-search" type="search" aria-label="Search the collection" placeholder="Find a good thing"></label><label class="sort-label">SORT BY <select id="sort-select" aria-label="Sort products"><option value="featured">Just in</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
+      <div class="product-grid" id="product-grid" aria-live="polite"></div>
+      <div class="empty-state hidden" id="empty-state"><span class="empty-icon">◌</span><strong>Nothing in this edit just yet.</strong><p>Try another category, or take a look at everything.</p><button class="button button-dark" id="clear-filter">See everything</button></div>
+      <p class="data-note" id="data-note"></p>
+    </section>
+
+    <section class="editorial page-section" id="story">
+      <div class="editorial-photo" role="img" aria-label="Editorial photograph of contemporary fashion"><span>OUR WAY OF SEEING THINGS · NO. 04</span></div>
+      <div class="editorial-copy"><span class="eyebrow"><span class="gold-rule"></span> NOT MORE. JUST BETTER.</span><h2>The best style<br>is the style<br>that feels like <i>you.</i></h2><p>We're not here to tell you what to wear. We're here to help you find the pieces you reach for without thinking — good fabric, honest prices, and the kind of fit that makes a long day a little better.</p><a class="text-link" href="#newsletter">A little more about us <span>↗</span></a><span class="editorial-signoff">With care, &nbsp;SR</span></div>
+    </section>
+
+    <section class="values-strip"><div><span>✳</span><strong>LESS, BUT LOVELIER</strong><p>Considered, not crowded.</p></div><div><span>〰</span><strong>MADE TO BE WORN</strong><p>For actual life, every day.</p></div><div><span>◇</span><strong>HONEST BY NATURE</strong><p>Good quality. Fair prices.</p></div></section>
+
+    <section class="newsletter-section" id="newsletter"><div class="newsletter-copy"><span class="eyebrow light-eyebrow"><span class="gold-rule"></span> A NOTE FROM US</span><h2>Good things,<br>once in a <i>while.</i></h2><p>New arrivals, considered ideas, the odd lovely surprise. No noise, ever.</p></div><form id="newsletter-form" class="newsletter-form"><label for="newsletter-email" class="sr-only">Email address</label><div class="newsletter-input-row"><input id="newsletter-email" type="email" autocomplete="email" placeholder="Your email address" required><button type="submit" aria-label="Request newsletter updates">↗</button></div><span>OUR NEWSLETTER IS GETTING READY. NO SPAM, EVER.</span><p id="newsletter-message" aria-live="polite"></p></form></section>
+  </main>
+
+  <main id="admin-view" class="admin-layout hidden">
+    <aside class="admin-sidebar" id="admin-sidebar"><a href="#" class="admin-brand"><span class="brand-seal">S<span>R</span></span><span>SR <span class="wordmark-light">STUDIO</span><small>BUSINESS, BEAUTIFULLY</small></span></a><div class="sidebar-label">YOUR BUSINESS</div><nav class="dashboard-nav" aria-label="Dashboard navigation"><button class="dashboard-nav-item active" data-panel="overview"><span>◫</span> Overview</button><button class="dashboard-nav-item" data-panel="products"><span>▤</span> Products & stock</button><button class="dashboard-nav-item" data-panel="orders"><span>▧</span> Orders <span class="nav-count" id="pending-count">0</span></button><button class="dashboard-nav-item" data-panel="expenses"><span>₹</span> Expenses</button><button class="dashboard-nav-item" data-panel="reports"><span>↗</span> Reports</button></nav><div class="sidebar-bottom"><div class="owner-card"><span class="owner-avatar">SR</span><span><strong id="owner-name">Preview mode</strong><small id="owner-role">Sample business</small></span><span class="owner-online"></span></div><button class="sidebar-store-link" id="back-to-store">← &nbsp; Back to the store</button><button class="sidebar-store-link hidden" id="logout-button">↪ &nbsp; Sign out</button></div></aside>
+    <section class="admin-content"><header class="admin-topbar"><div><button class="mobile-menu-button admin-mobile-menu" id="admin-menu-button" aria-label="Open dashboard navigation"><span class="menu-lines"></span></button><span class="breadcrumb">SR STUDIO &nbsp; / &nbsp; <strong id="breadcrumb-current">OVERVIEW</strong></span></div><div class="admin-top-actions"><span class="live-indicator"><span></span><span id="connection-label">DEMO PREVIEW</span></span><button class="button button-admin" id="login-button">Owner sign in ↗</button></div></header>
+      <div class="dashboard-page" id="dashboard-page">
+        <div class="dashboard-title-row"><div><span class="eyebrow"><span class="gold-rule"></span> THE BIG PICTURE</span><h1 id="dashboard-heading">A good day to <i>begin.</i></h1><p id="dashboard-date">Here’s how things are looking.</p></div><div class="period-select-wrap"><span>THE PAST</span><select id="date-filter" aria-label="Select reporting period"><option value="30">30 DAYS</option><option value="7">7 DAYS</option><option value="365">12 MONTHS</option></select></div></div>
+        <div class="demo-banner"><span>✳</span><div><strong id="demo-banner-title">YOU’RE TAKING A LOOK AROUND</strong><p id="demo-banner-text">These are illustrative sample figures, not your real business records. Sign in as the owner to manage real data.</p></div><button id="demo-banner-action">Make it yours ↗</button></div>
+        <section class="kpi-grid" aria-label="Business key figures"><article class="kpi-card kpi-revenue"><span class="kpi-label">NET SALES <span>↗</span></span><strong id="kpi-sales">₹0</strong><small>After discounts & refunds</small><div class="kpi-sparkline spark-gold" id="spark-revenue"></div></article><article class="kpi-card"><span class="kpi-label">GROSS PROFIT</span><strong id="kpi-gross">₹0</strong><small>Sales less the cost of goods</small><span class="kpi-footnote" id="gross-margin">0% gross margin</span></article><article class="kpi-card"><span class="kpi-label">NET PROFIT</span><strong id="kpi-net">₹0</strong><small>After operating expenses</small><span class="kpi-footnote" id="net-label">NO DOUBLE COUNTING</span></article><article class="kpi-card"><span class="kpi-label">INVENTORY AT COST</span><strong id="kpi-stock-value">₹0</strong><small id="low-stock-caption">Your stock, at what you paid</small><span class="kpi-footnote" id="low-stock-label">0 NEEDS ATTENTION</span></article></section>
+        <section class="analytics-grid"><article class="analytics-card sales-chart-card"><div class="card-heading"><div><span class="eyebrow">REVENUE OVER TIME</span><h2>Room to <i>grow.</i></h2></div><span class="chart-key"><i></i> Sales</span></div><div class="chart" id="sales-chart" role="img" aria-label="Sales over the selected date range"></div></article><article class="analytics-card sales-breakdown-card"><div class="card-heading"><div><span class="eyebrow">WHERE YOU STAND</span><h2>The <i>details.</i></h2></div></div><div id="business-breakdown" class="breakdown-list"></div></article></section>
+        <section class="bottom-grid"><article class="analytics-card bestsellers-card"><div class="card-heading"><div><span class="eyebrow">MOST LOVED</span><h2>What’s <i>moving.</i></h2></div><button class="subtle-action" data-go="products">All products ↗</button></div><div id="bestseller-list"></div></article><article class="analytics-card recent-orders-card"><div class="card-heading"><div><span class="eyebrow">FRESH OFF THE PRESS</span><h2>Recent <i>orders.</i></h2></div><button class="subtle-action" data-go="orders">All orders ↗</button></div><div id="recent-orders"></div></article></section>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer"><div class="footer-brand"><a class="wordmark footer-wordmark" href="#"><span class="brand-seal">S<span>R</span></span><span>SR <span class="wordmark-light">CLOTHING</span><small>GOOD THINGS TO GET DRESSED IN.</small></span></a><p>Thoughtfully chosen. Happily worn.</p><span class="footer-social">INSTAGRAM &nbsp; · &nbsp; PINTEREST &nbsp; · &nbsp; SAY HELLO ↗</span></div><div class="footer-column"><span>GOOD TO KNOW</span><a href="#shop">Shipping & returns</a><a href="#shop">Care guide</a><a href="#shop">Frequently asked</a></div><div class="footer-column"><span>FIND US</span><a href="mailto:hello@srclothing.in">hello@srclothing.in</a><a href="#story">Our story</a><a href="#newsletter">Get in touch ↗</a></div>  <div class="footer-bottom"><span>© 2026 SR CLOTHING. MADE WITH INTENTION.</span><span>INDIA &nbsp;·&nbsp; ₹ INR &nbsp;·&nbsp; GOOD THINGS AHEAD</span><span>PAYMENT OPTIONS &nbsp; COD · ONLINE GATEWAY PENDING SETUP</span></div></footer>
+
+  <div class="overlay hidden" id="overlay" aria-hidden="true"><section class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><button class="close-button" id="close-drawer" aria-label="Close">×</button><span class="eyebrow"><span class="gold-rule"></span> SR CLOTHING</span><h2 id="drawer-title">Your <i>bag.</i></h2><div id="drawer-content"></div></section></div>
+  <div class="toast" id="toast" aria-live="polite" role="status"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>

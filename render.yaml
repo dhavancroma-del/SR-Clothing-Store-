@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: sr-clothing-store
+    runtime: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    disk:
+      name: sr-clothing-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /var/data/sr-clothing.sqlite
