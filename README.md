@@ -13,6 +13,12 @@ npm start
 
 Open http://localhost:3000. Configure `.env` with your private production `APP_ORIGIN` and a durable, private `DB_PATH` before deployment. Keep `.env`, the SQLite database, customer addresses, and session data out of version control and public web folders. Protect and back up the database. Place the production app behind HTTPS; the owner session cookie is `Secure` in production.
 
+## Publish a public preview on GitHub Pages
+
+The GitHub Actions workflow in `.github/workflows/deploy-pages.yml` automatically publishes the static files in `public/` to GitHub Pages whenever a commit is pushed to `main`. The preview URL for this repository is https://dhavancroma-del.github.io/SR-Clothing-Store-/; the first deployment can take a few minutes. Check the repository's **Actions** tab for the deployment status.
+
+GitHub Pages only hosts static files. This URL provides the sample storefront and clearly labelled demo studio; it does **not** run the Node.js API, accept real orders, save owner changes, or provide an owner login. Use the Render deployment below for the full application with persistent storage. Do not accept real orders through the static preview.
+
 ## Publish on Render
 
 This project includes a Render Blueprint (`render.yaml`) that creates a Node.js web service and mounts a persistent disk for the private SQLite database. To publish it:
