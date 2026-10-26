@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Upload storefront preview
         uses: actions/upload-pages-artifact@v3
         with:
