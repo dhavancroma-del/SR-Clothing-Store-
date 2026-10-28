@@ -14,3 +14,7 @@ services:
         value: production
       - key: DB_PATH
         value: /var/data/sr-clothing.sqlite
+      - key: ADMIN_MFA_ENCRYPTION_KEY
+        sync: false
+      - key: ADMIN_IP_ALLOWLIST
+        sync: false

@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Create Super Admin Owner",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"run",
+				"create-owner"
+			],
+			"isBackground": false,
+			"problemMatcher": []
+		}
+	]
+}

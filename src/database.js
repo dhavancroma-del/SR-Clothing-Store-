@@ -17,14 +17,33 @@ function initializeDatabase() {
       email TEXT NOT NULL COLLATE NOCASE UNIQUE,
       password_hash TEXT NOT NULL,
       password_salt TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'super_admin'
+        CHECK (role IN ('super_admin','admin','staff')),
+      is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0,1)),
+      mfa_secret TEXT,
+      mfa_enabled INTEGER NOT NULL DEFAULT 0 CHECK (mfa_enabled IN (0,1)),
       created_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
       token_hash TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      expires_at TEXT NOT NULL
+      expires_at TEXT NOT NULL,
+      last_activity_at TEXT NOT NULL DEFAULT '',
+      csrf_token TEXT NOT NULL DEFAULT '',
+      mfa_verified INTEGER NOT NULL DEFAULT 0 CHECK (mfa_verified IN (0,1))
     );
     CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at);
+    CREATE TABLE IF NOT EXISTS admin_invitations (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL COLLATE NOCASE,
+      role TEXT NOT NULL CHECK (role IN ('admin','staff')),
+      token_hash TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      accepted_at TEXT,
+      created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS invitations_expiry ON admin_invitations(expires_at, accepted_at);
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sku TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -94,6 +113,15 @@ function initializeDatabase() {
       created_at TEXT NOT NULL
     );
   `);
+  const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map((column) => column.name));
+  if (!userColumns.has("role")) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'super_admin'");
+  if (!userColumns.has("is_active")) db.exec("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1");
+  if (!userColumns.has("mfa_secret")) db.exec("ALTER TABLE users ADD COLUMN mfa_secret TEXT");
+  if (!userColumns.has("mfa_enabled")) db.exec("ALTER TABLE users ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0");
+  const sessionColumns = new Set(db.prepare("PRAGMA table_info(sessions)").all().map((column) => column.name));
+  if (!sessionColumns.has("last_activity_at")) db.exec("ALTER TABLE sessions ADD COLUMN last_activity_at TEXT NOT NULL DEFAULT ''");
+  if (!sessionColumns.has("csrf_token")) db.exec("ALTER TABLE sessions ADD COLUMN csrf_token TEXT NOT NULL DEFAULT ''");
+  if (!sessionColumns.has("mfa_verified")) db.exec("ALTER TABLE sessions ADD COLUMN mfa_verified INTEGER NOT NULL DEFAULT 0");
   const productColumns = new Set(db.prepare("PRAGMA table_info(products)").all().map((column) => column.name));
   if (!productColumns.has("sizes_json")) db.exec("ALTER TABLE products ADD COLUMN sizes_json TEXT NOT NULL DEFAULT '[\"S\",\"M\",\"L\",\"XL\"]'");
   const itemColumns = new Set(db.prepare("PRAGMA table_info(order_items)").all().map((column) => column.name));

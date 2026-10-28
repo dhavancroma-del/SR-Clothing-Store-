@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Sign in — SR CLOTHING</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/admin-auth.css">
+</head>
+<body>
+  <main class="auth-card">
+    <a class="wordmark" href="/" aria-label="SR Clothing home">SR CLOTHING</a>
+    <p class="eyebrow">PRIVATE STAFF ACCESS</p>
+    <h1>Sign in <i>securely.</i></h1>
+    <p>Use your invited staff account and authenticator code.</p>
+    <form id="login-form">
+      <label>Email<input name="email" type="email" autocomplete="username" required maxlength="254"></label>
+      <label>Password<input name="password" type="password" autocomplete="current-password" required maxlength="72"></label>
+      <label>Authenticator code <span>(leave blank only during first-time setup)</span>
+        <input name="otp" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" maxlength="6">
+      </label>
+      <button class="button button-dark" type="submit">Sign in</button>
+      <p class="auth-error" id="auth-error" role="alert"></p>
+    </form>
+  </main>
+  <script src="/admin-auth.js" defer></script>
+</body>
+</html>

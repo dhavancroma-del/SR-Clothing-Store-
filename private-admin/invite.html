@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Accept staff invitation — SR CLOTHING</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/admin-auth.css">
+</head>
+<body>
+  <main class="auth-card">
+    <a class="wordmark" href="/" aria-label="SR Clothing home">SR CLOTHING</a>
+    <p class="eyebrow">INVITED STAFF ACCESS</p>
+    <h1>Create your <i>secure account.</i></h1>
+    <p>This invitation can be used once. An authenticator is required after account setup.</p>
+    <form id="invite-form">
+      <label>Password <span>(at least 12 characters)</span><input name="password" type="password" autocomplete="new-password" required minlength="12" maxlength="72"></label>
+      <label>Confirm password<input name="confirmPassword" type="password" autocomplete="new-password" required minlength="12" maxlength="72"></label>
+      <button class="button button-dark" type="submit">Accept invitation</button>
+      <p class="auth-error" id="auth-error" role="alert"></p>
+    </form>
+  </main>
+  <script src="/admin-auth.js" defer></script>
+</body>
+</html>

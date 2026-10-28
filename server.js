@@ -8,20 +8,27 @@ const helmet = require("helmet");
 const { rateLimit } = require("express-rate-limit");
 const { z } = require("zod");
 const { initializeDatabase } = require("./src/database");
+const {
+  decryptSecret, encryptSecret, hashPassword, ipAllowed, makeTotpSecret,
+  verifyPassword, verifyTotp
+} = require("./src/admin-security");
 
 const app = express();
 const db = initializeDatabase();
 const scrypt = promisify(crypto.scrypt);
 const APP_ORIGIN = process.env.APP_ORIGIN || process.env.RENDER_EXTERNAL_URL || "http://localhost:3000";
 const SESSION_MS = 8 * 60 * 60 * 1000;
+const IDLE_SESSION_MS = 20 * 60 * 1000;
 const COOKIE = "sr_owner";
+const ADMIN_DIR = require("node:path").join(__dirname, "private-admin");
 const money = z.number().finite().nonnegative().max(100000000);
 const idNumber = z.coerce.number().int().positive();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const orderStatuses = ["Confirmed", "Processing", "Shipped", "Delivered", "Cancelled", "Refunded"];
 
 app.disable("x-powered-by");
-app.set("trust proxy", process.env.TRUST_PROXY === "1");
+const trustedProxyHops = Number(process.env.TRUST_PROXY);
+app.set("trust proxy", Number.isInteger(trustedProxyHops) && trustedProxyHops > 0 ? trustedProxyHops : false);
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "same-site" },
   contentSecurityPolicy: {
@@ -41,7 +48,13 @@ app.use(helmet({
   }
 }));
 app.use(express.json({ limit: "32kb", strict: true }));
+app.use("/api/auth", (req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
 app.use("/api/auth/login", rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: "draft-8", legacyHeaders: false }));
+app.use("/api/auth/mfa/verify", rateLimit({ windowMs: 15 * 60 * 1000, limit: 8, standardHeaders: "draft-8", legacyHeaders: false }));
+app.use("/api/auth/invitations/accept", rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: "draft-8", legacyHeaders: false }));
 app.use("/api/orders", rateLimit({ windowMs: 15 * 60 * 1000, limit: 12, standardHeaders: "draft-8", legacyHeaders: false }));
 
 const cookieOptions = { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/", maxAge: SESSION_MS };
@@ -64,26 +77,106 @@ function guardSameOrigin(req, res, next) {
 }
 app.use("/api", guardSameOrigin);
 
-function requireOwner(req, res, next) {
-  const raw = req.cookies?.[COOKIE] || parseCookies(req.get("cookie"))[COOKIE];
-  if (!raw || !/^[a-f0-9]{64}$/.test(raw)) return res.status(401).json({ error: "Sign in with the store owner's account to continue." });
-  const session = db.prepare(`
-    SELECT u.id, u.email, s.expires_at FROM sessions s
-    JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?
-  `).get(sha256(raw));
-  if (!session || Date.parse(session.expires_at) <= Date.now()) {
-    db.prepare("DELETE FROM sessions WHERE token_hash = ?").run(sha256(raw));
-    res.clearCookie(COOKIE, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/" });
-    return res.status(401).json({ error: "Your studio session has expired. Please sign in again." });
-  }
-  req.owner = { id: session.id, email: session.email };
-  next();
-}
 function parseCookies(header = "") {
   return Object.fromEntries(header.split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
     const i = part.indexOf("=");
     return [decodeURIComponent(part.slice(0, i)), decodeURIComponent(part.slice(i + 1))];
   }));
+}
+function rawSessionToken(req) {
+  const raw = parseCookies(req.get("cookie"))[COOKIE];
+  return raw && /^[a-f0-9]{64}$/.test(raw) ? raw : null;
+}
+function getSession(req) {
+  const raw = rawSessionToken(req);
+  if (!raw) return null;
+  return db.prepare(`
+    SELECT u.id, u.email, u.role, u.is_active, u.mfa_enabled, u.mfa_secret,
+      s.token_hash, s.expires_at, s.last_activity_at, s.csrf_token, s.mfa_verified
+    FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?
+  `).get(sha256(raw));
+}
+function adminIpAllowed(req) {
+  return ipAllowed(req.ip, process.env.ADMIN_IP_ALLOWLIST);
+}
+function hidden(res) {
+  return res.status(404).send("Not found");
+}
+function issueSession(user, mfaVerified) {
+  const now = new Date();
+  const token = crypto.randomBytes(32).toString("hex");
+  const csrfToken = crypto.randomBytes(32).toString("hex");
+  const expires = new Date(now.getTime() + SESSION_MS).toISOString();
+  db.prepare("DELETE FROM sessions WHERE expires_at<=? OR last_activity_at<=?")
+    .run(now.toISOString(), new Date(now.getTime() - IDLE_SESSION_MS).toISOString());
+  db.prepare(`INSERT INTO sessions
+    (token_hash,user_id,expires_at,last_activity_at,csrf_token,mfa_verified)
+    VALUES (?,?,?,?,?,?)`)
+    .run(sha256(token), user.id, expires, now.toISOString(), csrfToken, mfaVerified ? 1 : 0);
+  return { token, csrfToken, expires };
+}
+function sessionValid(session) {
+  if (!session || !session.is_active) return false;
+  const now = Date.now();
+  return Date.parse(session.expires_at) > now &&
+    Date.parse(session.last_activity_at || 0) > now - IDLE_SESSION_MS;
+}
+function requireOwner(req, res, next) {
+  if (!adminIpAllowed(req)) return hidden(res);
+  const session = getSession(req);
+  if (!sessionValid(session) || !["super_admin", "admin", "staff"].includes(session.role)) {
+    if (session) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(session.token_hash);
+    res.clearCookie(COOKIE, cookieOptions);
+    return hidden(res);
+  }
+  if (!session.mfa_enabled || !session.mfa_verified) return hidden(res);
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    const supplied = Buffer.from(req.get("x-csrf-token") || "");
+    const expected = Buffer.from(session.csrf_token || "");
+    if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+      return res.status(403).json({ error: "This request could not be verified. Reload the page and try again." });
+    }
+  }
+  const activity = new Date().toISOString();
+  db.prepare("UPDATE sessions SET last_activity_at=? WHERE token_hash=?").run(activity, session.token_hash);
+  req.admin = { id: session.id, email: session.email, role: session.role, session };
+  next();
+}
+function requirePermission(permission) {
+  const rolePermissions = {
+    super_admin: ["*"],
+    admin: ["products.read", "products.write", "inventory.read", "inventory.adjust", "orders.read", "orders.update", "expenses.read", "expenses.write", "reports.read", "admins.read"],
+    staff: ["orders.read", "orders.update"]
+  };
+  return (req, res, next) => {
+    const permissions = rolePermissions[req.admin?.role] || [];
+    if (permission === "orders.update" && req.admin?.role === "staff" && req.body?.status === "Refunded") {
+      return res.status(403).json({ error: "Staff cannot issue refunds." });
+    }
+    if (!permissions.includes("*") && !permissions.includes(permission)) {
+      return res.status(403).json({ error: "Your account is not permitted to perform this action." });
+    }
+    next();
+  };
+}
+function requireSuperAdmin(req, res, next) {
+  if (req.admin?.role !== "super_admin") return res.status(403).json({ error: "Super Admin access is required." });
+  next();
+}
+function requirePendingMfa(req, res, next) {
+  if (!adminIpAllowed(req)) return hidden(res);
+  const session = getSession(req);
+  if (!sessionValid(session) || session.mfa_enabled || session.mfa_verified) return hidden(res);
+  req.pendingAdmin = session;
+  next();
+}
+function verifyPendingCsrf(req, res, next) {
+  const supplied = Buffer.from(req.get("x-csrf-token") || "");
+  const expected = Buffer.from(req.pendingAdmin.csrf_token || "");
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+    return res.status(403).json({ error: "This request could not be verified. Reload the page and try again." });
+  }
+  next();
 }
 function publicProduct(row) {
   return {
@@ -123,44 +216,146 @@ function customerOrderConfirmation(row) {
   const { cogs, ...order } = presentOrder(row);
   return { ...order, items: order.items.map(({ cost, ...item }) => item) };
 }
+function presentAdminOrder(row, role) {
+  return role === "staff" ? customerOrderConfirmation(row) : presentOrder(row);
+}
 
 app.get("/api/auth/session", (req, res) => {
-  const raw = parseCookies(req.get("cookie"))[COOKIE];
-  if (!raw || !/^[a-f0-9]{64}$/.test(raw)) return res.json({ user: null });
-  const row = db.prepare("SELECT u.id, u.email, s.expires_at FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=?").get(sha256(raw));
-  if (!row || Date.parse(row.expires_at) <= Date.now()) {
-    db.prepare("DELETE FROM sessions WHERE token_hash=?").run(sha256(raw));
+  const row = getSession(req);
+  if (!sessionValid(row) || !adminIpAllowed(req)) {
+    if (row) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(row.token_hash);
     return res.json({ user: null });
   }
-  res.json({ user: { email: row.email } });
+  db.prepare("UPDATE sessions SET last_activity_at=? WHERE token_hash=?").run(new Date().toISOString(), row.token_hash);
+  res.json({
+    user: row.mfa_enabled && row.mfa_verified
+      ? { email: row.email, role: row.role, mfaEnabled: true, mfaVerified: true }
+      : null,
+    csrfToken: row.csrf_token
+  });
 });
 
 app.post("/api/auth/login", async (req, res, next) => {
   try {
+    if (!adminIpAllowed(req)) return hidden(res);
     const data = validate(z.object({
       email: z.string().email().max(254).transform((v) => v.toLowerCase()),
-      password: z.string().min(1).max(1024)
+      password: z.string().min(1).max(72).refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password must be at most 72 UTF-8 bytes."),
+      otp: z.string().regex(/^\d{6}$/).optional()
     }).strict(), req.body);
     const user = db.prepare("SELECT * FROM users WHERE email=?").get(data.email);
-    if (!user) throw fail(401, "That email or password isn’t quite right.");
-    const candidate = await scrypt(data.password, user.password_salt, 64);
-    const stored = Buffer.from(user.password_hash, "hex");
-    if (candidate.length !== stored.length || !crypto.timingSafeEqual(candidate, stored)) {
+    let passwordMatches = false;
+    if (user?.is_active && /^\$2[aby]\$/.test(user.password_hash)) {
+      passwordMatches = await verifyPassword(data.password, user.password_hash);
+    } else if (user?.is_active) {
+      const candidate = await scrypt(data.password, user.password_salt, 64);
+      const stored = Buffer.from(user.password_hash, "hex");
+      passwordMatches = candidate.length === stored.length && crypto.timingSafeEqual(candidate, stored);
+      if (passwordMatches) {
+        const upgradedHash = await hashPassword(data.password);
+        db.prepare("UPDATE users SET password_hash=?,password_salt='' WHERE id=?").run(upgradedHash, user.id);
+      }
+    }
+    if (!passwordMatches) {
       throw fail(401, "That email or password isn’t quite right.");
     }
-    const now = new Date();
-    const token = crypto.randomBytes(32).toString("hex");
-    const expires = new Date(now.getTime() + SESSION_MS).toISOString();
-    db.prepare("DELETE FROM sessions WHERE expires_at <= ?").run(now.toISOString());
-    db.prepare("INSERT INTO sessions (token_hash,user_id,expires_at) VALUES (?,?,?)").run(sha256(token), user.id, expires);
-    res.cookie(COOKIE, token, cookieOptions).json({ user: { email: user.email }, expiresAt: expires });
+    if (user.mfa_enabled && (!data.otp || !verifyTotp(decryptSecret(user.mfa_secret), data.otp))) {
+      throw fail(401, "That email, password, or authenticator code isn’t quite right.");
+    }
+    const session = issueSession(user, Boolean(user.mfa_enabled));
+    res.cookie(COOKIE, session.token, cookieOptions).json({
+      user: { email: user.email, role: user.role, mfaEnabled: Boolean(user.mfa_enabled) },
+      csrfToken: session.csrfToken,
+      expiresAt: session.expires
+    });
   } catch (error) { next(error); }
 });
 
 app.post("/api/auth/logout", (req, res) => {
-  const raw = parseCookies(req.get("cookie"))[COOKIE];
-  if (raw && /^[a-f0-9]{64}$/.test(raw)) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(sha256(raw));
+  const raw = rawSessionToken(req);
+  if (raw) {
+    const session = db.prepare("SELECT csrf_token FROM sessions WHERE token_hash=?").get(sha256(raw));
+    if (session) {
+      const supplied = Buffer.from(req.get("x-csrf-token") || "");
+      const expected = Buffer.from(session.csrf_token || "");
+      if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+        return res.status(403).json({ error: "This request could not be verified. Reload the page and try again." });
+      }
+      db.prepare("DELETE FROM sessions WHERE token_hash=?").run(sha256(raw));
+    }
+  }
   res.clearCookie(COOKIE, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/" }).status(204).end();
+});
+
+app.get("/api/auth/mfa/setup", requirePendingMfa, (req, res, next) => {
+  try {
+    let secret = req.pendingAdmin.mfa_secret;
+    if (!secret) {
+      secret = encryptSecret(makeTotpSecret());
+      db.prepare("UPDATE users SET mfa_secret=? WHERE id=?").run(secret, req.pendingAdmin.id);
+    }
+    const plain = decryptSecret(secret);
+    const label = encodeURIComponent(`SR CLOTHING:${req.pendingAdmin.email}`);
+    const issuer = encodeURIComponent("SR CLOTHING");
+    res.json({
+      secret: plain,
+      otpauthUrl: `otpauth://totp/${label}?secret=${plain}&issuer=${issuer}&algorithm=SHA1&digits=6&period=30`,
+      csrfToken: req.pendingAdmin.csrf_token
+    });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/auth/mfa/verify", requirePendingMfa, verifyPendingCsrf, (req, res, next) => {
+  try {
+    const { otp } = validate(z.object({ otp: z.string().regex(/^\d{6}$/) }).strict(), req.body);
+    const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.pendingAdmin.id);
+    if (!user.mfa_secret || !verifyTotp(decryptSecret(user.mfa_secret), otp)) {
+      throw fail(400, "That authenticator code is not valid. Check your device clock and try again.");
+    }
+    const csrfToken = crypto.randomBytes(32).toString("hex");
+    const now = new Date().toISOString();
+    db.transaction(() => {
+      db.prepare("UPDATE users SET mfa_enabled=1 WHERE id=?").run(user.id);
+      db.prepare("DELETE FROM sessions WHERE user_id=? AND token_hash!=?").run(user.id, req.pendingAdmin.token_hash);
+      db.prepare("UPDATE sessions SET mfa_verified=1,csrf_token=?,last_activity_at=? WHERE token_hash=?")
+        .run(csrfToken, now, req.pendingAdmin.token_hash);
+    })();
+    res.json({ user: { email: user.email, role: user.role, mfaEnabled: true }, csrfToken });
+  } catch (error) { next(error); }
+});
+
+app.post("/api/auth/invitations/accept", async (req, res, next) => {
+  try {
+    if (!adminIpAllowed(req)) return hidden(res);
+    const input = validate(z.object({
+      token: z.string().regex(/^[a-f0-9]{64}$/),
+      password: z.string().min(12).max(72).refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password must be at most 72 UTF-8 bytes.")
+    }).strict(), req.body);
+    const tokenHash = sha256(input.token);
+    const invitation = db.prepare("SELECT * FROM admin_invitations WHERE token_hash=? AND accepted_at IS NULL AND expires_at>?")
+      .get(tokenHash, new Date().toISOString());
+    if (!invitation) throw fail(400, "This invitation is invalid or has expired.");
+    if (db.prepare("SELECT 1 FROM users WHERE email=?").get(invitation.email)) {
+      throw fail(409, "An account already exists for this invitation.");
+    }
+    const passwordHash = await hashPassword(input.password);
+    const now = new Date().toISOString();
+    const accept = db.transaction(() => {
+      const current = db.prepare("SELECT * FROM admin_invitations WHERE id=? AND accepted_at IS NULL AND expires_at>?").get(invitation.id, now);
+      if (!current) throw fail(409, "This invitation has already been used or has expired.");
+      const result = db.prepare(`INSERT INTO users
+        (email,password_hash,password_salt,role,is_active,created_at)
+        VALUES (?,?, '', ?,1,?)`).run(current.email, passwordHash, current.role, now);
+      db.prepare("UPDATE admin_invitations SET accepted_at=? WHERE id=?").run(now, current.id);
+      return { id: result.lastInsertRowid, email: current.email, role: current.role };
+    });
+    const user = accept();
+    const session = issueSession(user, false);
+    res.cookie(COOKIE, session.token, cookieOptions).status(201).json({
+      user: { email: user.email, role: user.role, mfaEnabled: false },
+      csrfToken: session.csrfToken
+    });
+  } catch (error) { next(error); }
 });
 
 app.get("/api/products", (req, res) => {
@@ -218,7 +413,7 @@ app.post("/api/orders", (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.get("/api/admin/overview", requireOwner, (req, res) => {
+app.get("/api/admin/overview", requireOwner, requirePermission("reports.read"), (req, res) => {
   const range = Math.min(Math.max(Number(req.query.days) || 30, 1), 366);
   const since = new Date(Date.now() - range * 86400000).toISOString();
   const monthStart = `${new Date().toISOString().slice(0, 7)}-01`;
@@ -250,7 +445,7 @@ app.get("/api/admin/overview", requireOwner, (req, res) => {
   });
 });
 
-app.get("/api/admin/products", requireOwner, (req, res) => {
+app.get("/api/admin/products", requireOwner, requirePermission("products.read"), (req, res) => {
   res.json({ products: ownerProductQuery().map((p) => ({ ...publicProduct(p), status: p.status })) });
 });
 const productInput = z.object({
@@ -283,10 +478,10 @@ function saveProduct(p, existingId = null) {
   if(p.stock)db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,created_at) VALUES (?,?,?,?,?)").run(result.lastInsertRowid,p.sku,p.stock,"Initial stock receipt",now);
   return db.prepare("SELECT * FROM products WHERE id=?").get(result.lastInsertRowid);
 }
-app.post("/api/admin/products", requireOwner, (req,res,next)=>{try{const p=validate(productInput,req.body);res.status(201).json({product:publicProduct(saveProduct(p))});}catch(e){next(e);}});
-app.patch("/api/admin/products/:id", requireOwner, (req,res,next)=>{try{const p=validate(productInput.partial().strict(),req.body);const current=db.prepare("SELECT * FROM products WHERE id=?").get(idNumber.parse(req.params.id));if(!current)throw fail(404,"This product could not be found.");const merged={name:current.name,sku:current.sku,category:current.category,description:current.description,image:current.image,cost:paiseToRupees(current.cost_paise),price:paiseToRupees(current.price_paise),discountPrice:current.discount_paise===null?null:paiseToRupees(current.discount_paise),stock:current.stock,minStock:current.min_stock,supplier:current.supplier,status:current.status,colors:JSON.parse(current.colors_json),sizes:JSON.parse(current.sizes_json),...p};res.json({product:publicProduct(saveProduct(merged,current.id))});}catch(e){next(e);}});
+app.post("/api/admin/products", requireOwner, requirePermission("products.write"), (req,res,next)=>{try{const p=validate(productInput,req.body);res.status(201).json({product:publicProduct(saveProduct(p))});}catch(e){next(e);}});
+app.patch("/api/admin/products/:id", requireOwner, requirePermission("products.write"), (req,res,next)=>{try{const p=validate(productInput.partial().strict(),req.body);const current=db.prepare("SELECT * FROM products WHERE id=?").get(idNumber.parse(req.params.id));if(!current)throw fail(404,"This product could not be found.");const merged={name:current.name,sku:current.sku,category:current.category,description:current.description,image:current.image,cost:paiseToRupees(current.cost_paise),price:paiseToRupees(current.price_paise),discountPrice:current.discount_paise===null?null:paiseToRupees(current.discount_paise),stock:current.stock,minStock:current.min_stock,supplier:current.supplier,status:current.status,colors:JSON.parse(current.colors_json),sizes:JSON.parse(current.sizes_json),...p};res.json({product:publicProduct(saveProduct(merged,current.id))});}catch(e){next(e);}});
 
-app.get("/api/admin/orders",requireOwner,(req,res)=>res.json({orders:db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 500").all().map(presentOrder)}));
+app.get("/api/admin/orders",requireOwner,requirePermission("orders.read"),(req,res)=>res.json({orders:db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 500").all().map(row=>presentAdminOrder(row,req.admin.role))}));
 const changeOrder = db.transaction((id,status,restock=false)=>{
   const order=db.prepare("SELECT * FROM orders WHERE id=?").get(id);
   if(!order)throw fail(404,"This order could not be found.");
@@ -323,18 +518,92 @@ const changeOrder = db.transaction((id,status,restock=false)=>{
   db.prepare("UPDATE orders SET status=?,reserved=? WHERE id=?").run(status,reserved,id);
   return db.prepare("SELECT * FROM orders WHERE id=?").get(id);
 });
-app.patch("/api/admin/orders/:id",requireOwner,(req,res,next)=>{try{const {status,restock}=validate(z.object({status:z.enum(orderStatuses),restock:z.boolean().optional().default(false)}).strict(),req.body);if(restock&&status!=="Refunded")throw fail(400,"Only refunded orders can be returned to inventory.");res.json({order:presentOrder(changeOrder(req.params.id,status,restock))});}catch(e){next(e);}});
+app.patch("/api/admin/orders/:id",requireOwner,requirePermission("orders.update"),(req,res,next)=>{try{const {status,restock}=validate(z.object({status:z.enum(orderStatuses),restock:z.boolean().optional().default(false)}).strict(),req.body);if(restock&&status!=="Refunded")throw fail(400,"Only refunded orders can be returned to inventory.");res.json({order:presentAdminOrder(changeOrder(req.params.id,status,restock),req.admin.role)});}catch(e){next(e);}});
 
-app.get("/api/admin/expenses",requireOwner,(req,res)=>{const rows=db.prepare("SELECT * FROM expenses ORDER BY date DESC,id DESC LIMIT 500").all().map(r=>({id:r.id,category:r.category,amount:paiseToRupees(r.amount_paise),description:r.description,reference:r.reference,date:r.date}));res.json({expenses:rows});});
+app.get("/api/admin/expenses",requireOwner,requirePermission("expenses.read"),(req,res)=>{const rows=db.prepare("SELECT * FROM expenses ORDER BY date DESC,id DESC LIMIT 500").all().map(r=>({id:r.id,category:r.category,amount:paiseToRupees(r.amount_paise),description:r.description,reference:r.reference,date:r.date}));res.json({expenses:rows});});
 const expenseInput=z.object({category:z.enum(["Rent","Salaries","Advertising","Packaging","Shipping","Utilities","Payment fees","Website","Miscellaneous"]),amount:z.number().finite().positive().max(100000000),description:z.string().trim().min(1).max(300),reference:z.string().max(120).optional().default(""),date:isoDate}).strict();
-app.post("/api/admin/expenses",requireOwner,(req,res,next)=>{try{const x=validate(expenseInput,req.body);const result=db.prepare("INSERT INTO expenses (category,amount_paise,description,reference,date,created_at) VALUES (?,?,?,?,?,?)").run(x.category,moneyToPaise(x.amount),x.description,x.reference,x.date,new Date().toISOString());res.status(201).json({expense:{id:result.lastInsertRowid,...x}});}catch(e){next(e);}});
-app.get("/api/admin/stock-movements",requireOwner,(req,res)=>{const movements=db.prepare("SELECT id,product_id AS productId,sku,change_quantity AS changeQuantity,reason,reference,created_at AS createdAt FROM stock_movements ORDER BY created_at DESC LIMIT 500").all();res.json({movements});});
+app.post("/api/admin/expenses",requireOwner,requirePermission("expenses.write"),(req,res,next)=>{try{const x=validate(expenseInput,req.body);const result=db.prepare("INSERT INTO expenses (category,amount_paise,description,reference,date,created_at) VALUES (?,?,?,?,?,?)").run(x.category,moneyToPaise(x.amount),x.description,x.reference,x.date,new Date().toISOString());res.status(201).json({expense:{id:result.lastInsertRowid,...x}});}catch(e){next(e);}});
+app.get("/api/admin/stock-movements",requireOwner,requirePermission("inventory.read"),(req,res)=>{const movements=db.prepare("SELECT id,product_id AS productId,sku,change_quantity AS changeQuantity,reason,reference,created_at AS createdAt FROM stock_movements ORDER BY created_at DESC LIMIT 500").all();res.json({movements});});
+
+app.get("/api/admin/users", requireOwner, requirePermission("admins.read"), (req, res) => {
+  const users = db.prepare("SELECT id,email,role,is_active AS active,mfa_enabled AS mfaEnabled,created_at AS createdAt FROM users ORDER BY id").all();
+  res.json({ users });
+});
+app.post("/api/admin/invitations", requireOwner, requireSuperAdmin, (req, res, next) => {
+  try {
+    const data = validate(z.object({
+      email: z.string().email().max(254).transform((value) => value.toLowerCase()),
+      role: z.enum(["admin", "staff"])
+    }).strict(), req.body);
+    if (db.prepare("SELECT 1 FROM users WHERE email=?").get(data.email)) throw fail(409, "An account already exists for that email.");
+    const token = crypto.randomBytes(32).toString("hex");
+    const id = crypto.randomUUID();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
+    db.prepare(`INSERT INTO admin_invitations
+      (id,email,role,token_hash,expires_at,created_by,created_at) VALUES (?,?,?,?,?,?,?)`)
+      .run(id, data.email, data.role, sha256(token), expiresAt, req.admin.id, now.toISOString());
+    res.status(201).json({ invitation: { email: data.email, role: data.role, expiresAt, url: `/admin/invite?token=${token}` } });
+  } catch (error) { next(error); }
+});
+app.patch("/api/admin/users/:id", requireOwner, requireSuperAdmin, (req, res, next) => {
+  try {
+    const id = idNumber.parse(req.params.id);
+    const input = validate(z.object({
+      role: z.enum(["super_admin", "admin", "staff"]).optional(),
+      active: z.boolean().optional()
+    }).strict().refine((value) => Object.keys(value).length > 0), req.body);
+    if (id === req.admin.id && (input.active === false || (input.role && input.role !== "super_admin"))) {
+      throw fail(400, "You cannot disable or demote your own Super Admin account.");
+    }
+    const user = db.prepare("SELECT id,role,is_active FROM users WHERE id=?").get(id);
+    if (!user) throw fail(404, "This account could not be found.");
+    if (user.role === "super_admin" && user.is_active &&
+        (input.role && input.role !== "super_admin" || input.active === false)) {
+      const otherSuperAdmins = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='super_admin' AND is_active=1 AND id!=?")
+        .get(id).count;
+      if (!otherSuperAdmins) throw fail(409, "At least one active Super Admin account must remain.");
+    }
+    const updated = db.prepare("UPDATE users SET role=COALESCE(?,role),is_active=COALESCE(?,is_active) WHERE id=?")
+      .run(input.role || null, input.active === undefined ? null : Number(input.active), id);
+    if (input.active === false) db.prepare("DELETE FROM sessions WHERE user_id=?").run(id);
+    res.json({ updated: updated.changes === 1 });
+  } catch (error) { next(error); }
+});
+
+app.get("/admin", (req, res) => {
+  if (!adminIpAllowed(req)) return hidden(res);
+  const session = getSession(req);
+  if (!sessionValid(session) || !session.mfa_enabled || !session.mfa_verified ||
+      !["super_admin", "admin", "staff"].includes(session.role)) return hidden(res);
+  res.set("Cache-Control", "no-store").sendFile(require("node:path").join(ADMIN_DIR, "index.html"));
+});
+app.get("/admin/login", (req, res) => {
+  if (!adminIpAllowed(req)) return hidden(res);
+  const session = getSession(req);
+  if (sessionValid(session)) {
+    return res.redirect(session.mfa_enabled && session.mfa_verified ? "/admin" : "/admin/mfa-setup");
+  }
+  res.set("Cache-Control", "no-store").sendFile(require("node:path").join(ADMIN_DIR, "login.html"));
+});
+app.get("/admin/mfa-setup", (req, res) => {
+  if (!adminIpAllowed(req)) return hidden(res);
+  const session = getSession(req);
+  if (!sessionValid(session) || session.mfa_enabled || session.mfa_verified) return hidden(res);
+  res.set("Cache-Control", "no-store").sendFile(require("node:path").join(ADMIN_DIR, "mfa-setup.html"));
+});
+app.get("/admin/invite", (req, res) => {
+  if (!adminIpAllowed(req)) return hidden(res);
+  res.set({ "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" })
+    .sendFile(require("node:path").join(ADMIN_DIR, "invite.html"));
+});
 
 app.use(express.static(require("node:path").join(__dirname,"public"),{index:"index.html",etag:true,maxAge:process.env.NODE_ENV==="production"?"1h":0}));
+app.get("/admin/*path", (req, res) => hidden(res));
 app.use("/api",(req,res)=>res.status(404).json({error:"This store service does not have that endpoint."}));
 app.use((req,res)=>res.status(404).send("Not found"));
 app.use((error,req,res,next)=>{if(res.headersSent)return next(error);if(error.code==="SQLITE_CONSTRAINT_UNIQUE")return res.status(409).json({error:"That SKU or email is already in use."});if(error.code==="SQLITE_CONSTRAINT_CHECK")return res.status(400).json({error:"That value is outside the permitted range."});if(error instanceof SyntaxError&&"body" in error)return res.status(400).json({error:"Please send valid JSON."});if(error.name==="ZodError")return res.status(400).json({error:error.issues.map(i=>i.message).join("; ")});const status=Number.isInteger(error.status)?error.status:500;if(status>=500)console.error("SR CLOTHING request failed:",error);res.status(status).json({error:status>=500?"Something went wrong. Please try again.":error.message});});
 
 const port=Number(process.env.PORT)||3000;
 if(require.main===module){app.listen(port,()=>console.log(`SR CLOTHING is ready at http://localhost:${port} · database: ${process.env.DB_PATH||"./data/sr-clothing.sqlite"}`));}
-module.exports={app};
+module.exports={app,db};

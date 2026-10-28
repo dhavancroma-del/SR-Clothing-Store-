@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Set up MFA — SR CLOTHING</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/admin-auth.css">
+</head>
+<body>
+  <main class="auth-card">
+    <a class="wordmark" href="/" aria-label="SR Clothing home">SR CLOTHING</a>
+    <p class="eyebrow">REQUIRED ACCOUNT SECURITY</p>
+    <h1>Set up <i>two-step sign in.</i></h1>
+    <p>Add this account to an authenticator app, then enter its current six-digit code.</p>
+    <p class="secret-label">Manual setup key</p>
+    <code class="secret" id="mfa-secret">Loading secure setup…</code>
+    <form id="mfa-form">
+      <label>Six-digit authenticator code<input name="otp" inputmode="numeric" pattern="[0-9]{6}" autocomplete="one-time-code" required maxlength="6"></label>
+      <button class="button button-dark" type="submit">Verify and continue</button>
+      <p class="auth-error" id="auth-error" role="alert"></p>
+    </form>
+  </main>
+  <script src="/admin-auth.js" defer></script>
+</body>
+</html>
