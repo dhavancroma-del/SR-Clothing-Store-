@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   "use strict";
 
   const providedImages = ["uspw.png","hodbaw.png","hodb.png","hodb1.png","uspw.png","hodr1.png","hodbaw.png","hodr.png"];
@@ -20,19 +20,27 @@
   const img = (source) => productImage(source);
   const catalogImage = (product, index) => ({
     ...product,
-    image: !product.image || /^https?:\/\/images\.unsplash\.com\//i.test(String(product.image)) || /^photo-\d+-/i.test(String(product.image))
+    image: product.sku === "SR-M-001"
+      ? "polo-checked-shirt.jpg"
+      : !product.image || /^https?:\/\/images\.unsplash\.com\//i.test(String(product.image)) || /^photo-\d+-/i.test(String(product.image))
       ? providedImages[index % providedImages.length]
       : product.image
   });
   const seedProducts = [
-    {id:1,name:"USPOLO ",category:"Men",price:1890,cost:850,stock:24,minStock:5,sku:"SR-M-001",tag:"THE ONE YOU REACH FOR",image:"uspw.png",sold:38,colors:["#ffffff"]},
-    {id:2,name:"Soft Hours Knit",category:"Women",price:2290,cost:1040,stock:18,minStock:5,sku:"SR-W-002",tag:"JUST LANDED",image:"hodbaw.png",sold:29,colors:["#e5dfd4","#908273","#3d3c37"]},
-    {id:3,name:"The Every Day Tote",category:"Accessories",price:1190,cost:430,stock:7,sku:"SR-A-003",tag:"LOW STOCK",image:"photo-1590874103328-eac38a683ce7",sold:45,colors:["#a4825a","#332b23"]},
-    {id:4,name:"After Hours Jacket",category:"Men",price:3290,cost:1570,stock:3,sku:"SR-M-004",tag:"A GOOD FIND",image:"photo-1591047139829-d91aecb6caea",sold:17,colors:["#383b36","#9a927d"]},
-    {id:5,name:"Sunday Best Shirt",category:"Women",price:1590,cost:680,stock:21,sku:"SR-W-005",tag:"JUST LANDED",image:"photo-1485230895905-ec40ba36b9bc",sold:32,colors:["#eee5da","#b09a85"]},
-    {id:6,name:"Field Notes Cap",category:"Accessories",price:790,cost:290,stock:31,sku:"SR-A-006",tag:"LITTLE FAVOURITE",image:"photo-1588850561407-ed78c282e89b",sold:53,colors:["#a79a85","#30312d","#6b5446"]},
-    {id:7,name:"The Kindred Knit",category:"Women",price:2490,cost:1180,stock:12,sku:"SR-W-007",tag:"A KEEPER",image:"photo-1434389677669-e08b4cac3105",sold:24,colors:["#c3b5a1","#4a4a40"]},
+    {id:1,name:"POLO Ralph Lauren Checked  Shirt",category:"Men",price:1099,cost:850,stock:24,minStock:5,sku:"SR-M-001",tag:"JUST LANDED",image:"polo-checked-shirt.jpg",sold:38,colors:["#f0eee3"]},
+    {id:2,name:"Puma Hoodies Black /Cream Colour ",category:"men",price:1499,cost:1040,stock:18,minStock:5,sku:"SR-W-002",tag:"JUST LANDED",image:"hodbaw.png",sold:29,colors:["#d1c5b0","#080808"]},
+    {id:3,name:"Puma Hoodies Black",category:"Accessories",price:1499,cost:430,stock:7,sku:"SR-A-003",tag:"LOW STOCK",image:"photo-1590874103328-eac38a683ce7",sold:45,colors:["#0c0c0c"]},
+    {id:4,name:"Puma Hoodies Black ",category:"Men",price:1499,cost:1570,stock:3,sku:"SR-M-004",tag:"A GOOD FIND",image:"photo-1591047139829-d91aecb6caea",sold:17,colors:["#050505"]},
+    {id:5,name:"U.S Polo White Shirt",category:"Women",price:999,cost:680,stock:21,sku:"SR-W-005",tag:"JUST LANDED",image:"photo-1485230895905-ec40ba36b9bc",sold:32,colors:["#f9f7f3"]},
+    {id:6,name:"Puma Hoodies",category:"Accessories",price:1499,cost:290,stock:31,sku:"SR-A-006",tag:"LITTLE FAVOURITE",image:"photo-1588850561407-ed78c282e89b",sold:53,colors:["#e81717"]},
+    {id:7,name:"The Kindred Knit",category:"Women",price:1499,cost:1180,stock:12,sku:"SR-W-007",tag:"A KEEPER",image:"photo-1434389677669-e08b4cac3105",sold:24,colors:["#c3b5a1","#4a4a40"]},
     {id:8,name:"Weekend Standard",category:"Men",price:990,cost:390,stock:28,sku:"SR-M-008",tag:"MADE TO LAST",image:"photo-1521572163474-6864f9cf17ab",sold:61,colors:["#e8e5dd","#4b4943","#8d7770"]},
+    {id:9,name:"Navy U.S Polo T-Shirt",category:"Men",price:999,cost:850,stock:18,minStock:5,sku:"SR-M-009",tag:"JUST LANDED",image:"IMG_20261024_233713411.jpg.jpeg",sold:0,colors:["#20232d"]},
+    {id:10,name:"POLO Ralph Lauren Checked  Shirt",category:"Men",price:1099,cost:1040,stock:14,minStock:5,sku:"SR-M-010",tag:"JUST LANDED",image:"IMG_20261024_234433402.jpg.jpeg",sold:0,colors:["#e7e2d5","#516779"]},
+    {id:11,name:"Pink POLO Ralph Lauren Checked  Shirt",category:"Men",price:1099,cost:1040,stock:12,minStock:5,sku:"SR-M-011",tag:"JUST LANDED",image:"IMG_20261024_234607049.jpg.jpeg",sold:0,colors:["#d2aba7","#8da5a7"]},
+    {id:12,name:"POLO Ralph Lauren Checked  Shirt",category:"Men",price:1099,cost:1040,stock:10,minStock:5,sku:"SR-M-012",tag:"JUST LANDED",image:"IMG_20261024_234713411.jpg.jpeg",sold:0,colors:["#393542","#827b83"]},
+    {id:13,name:"White Superdry Graphic  Shirt",category:"Men",price:999,cost:680,stock:16,minStock:5,sku:"SR-M-013",tag:"JUST LANDED",image:"IMG_20261024_235012840.jpg.jpeg",sold:0,colors:["#f5f3ed"]},
+    {id:14,name:"Adidas Black Zip-Up Jacket",category:"Men",price:1499,cost:1040,stock:1,minStock:5,sku:"SR-M-014",tag:"LOW STOCK",image:"WhatsApp Image 2026-10-28 at 5.03.38 PM.jpeg",sold:0,colors:["#111111"]},
   ];
   const demoOrders = [
     {id:"SR-2048",customer:"Aarav Mehta",products:"Sunday Overshirt Ã— 2",amount:3780,status:"DELIVERED",date:"Today, 10:42 am",cost:1700},
@@ -49,13 +57,13 @@
   ];
   const demo = {products:structuredCloneSafe(seedProducts.map(catalogImage)),orders:structuredCloneSafe(demoOrders),expenses:structuredCloneSafe(demoExpenses)};
   demo.orders.forEach((order,index)=>{order.createdAt=new Date(Date.now()-[0,0,1,1,3][index]*86400000).toISOString();});
-  const api = {ready:false,user:null,csrfToken:""};
+  const api = {ready:false,catalogEmpty:false,user:null,csrfToken:""};
   const state = {category:"All",query:"",sort:"featured",cart:{},variants:{},detailId:null,wishlist:new Set(),panel:"overview",range:30,toastTimer:0,newsletterEmail:"",drawerTrigger:null};
   const customerStateKey="sr-clothing-customer-state";
   let logoClickCount=0,logoClickStartedAt=0;
   const $ = (id) => document.getElementById(id);
   const overviewTemplate = $("dashboard-page")?.innerHTML || "";
-  const rupees = (n) => "â‚¹" + Math.round(Number(n)||0).toLocaleString("en-IN");
+  const rupees = (n) => new Intl.NumberFormat("en-IN", {style:"currency",currency:"INR",maximumFractionDigits:0}).format(Math.round(Number(n)||0));
   const esc = (v) => String(v??"").replace(/[&<>"']/g,(c)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   function structuredCloneSafe(value){return JSON.parse(JSON.stringify(value));}
   function restoreCustomerState(){try{const saved=JSON.parse(localStorage.getItem(customerStateKey)||"{}");if(saved&&typeof saved==="object"&&!Array.isArray(saved)){state.cart=Object.fromEntries(Object.entries(saved.cart||{}).filter(([key,quantity])=>/^\d+::/.test(key)&&Number.isInteger(quantity)&&quantity>0&&quantity<=25));state.wishlist=new Set((Array.isArray(saved.wishlist)?saved.wishlist:[]).map(Number).filter(id=>Number.isSafeInteger(id)&&id>0));}}catch(error){console.error("Unable to restore the saved bag and wishlist:",error);}}
@@ -64,10 +72,10 @@
   async function request(path,options={}){const headers={"Content-Type":"application/json",...(options.headers||{})};if(options.method&&options.method!=="GET"&&options.method!=="HEAD"&&api.csrfToken)headers["X-CSRF-Token"]=api.csrfToken;const response=await fetch(`/api${path}`,{credentials:"same-origin",...options,headers});if(!response.ok){const body=await response.json().catch(()=>({}));throw new Error(body.error||`Request failed (${response.status})`);}return response.status===204?null:response.json();}
   const productList=()=>demo.products;
   function reconcileCart(){let changed=false;const remaining=new Map();for(const [key,quantity] of Object.entries(state.cart)){const [id,size,color]=key.split("::");const product=productList().find(item=>String(item.id)===id);if(!product||product.stock<1||(product.sizes?.length&&!product.sizes.includes(size))||(product.colors?.length&&!product.colors.includes(color))){delete state.cart[key];changed=true;continue;}const available=Math.max(0,Number(product.stock)-Number(remaining.get(id)||0));const kept=Math.min(quantity,available,25);if(kept<1){delete state.cart[key];changed=true;continue;}remaining.set(id,Number(remaining.get(id)||0)+kept);if(kept!==quantity){state.cart[key]=kept;changed=true;}}if(changed){updateCartCount();toast("Your bag was updated to match current availability.");}}
-  async function syncProducts(){try{const data=await request("/products");if(Array.isArray(data.products)){demo.products=data.products.map((p,index)=>({...catalogImage(p,index),colors:Array.isArray(p.colors)?p.colors:[],sizes:Array.isArray(p.sizes)?p.sizes:[],minStock:p.minStock??5,sold:p.unitsSold||0}));api.ready=true;reconcileCart();renderProducts();renderAdmin();if($("overlay").dataset.mode==="cart")renderDrawer();} }catch{/* The clearly identified sample shop works without a configured server. */}}
+  async function syncProducts(){try{const data=await request("/products");if(Array.isArray(data.products)){api.ready=data.products.length>0;api.catalogEmpty=!api.ready;if(api.ready)demo.products=data.products.map((p,index)=>({...catalogImage(p,index),colors:Array.isArray(p.colors)?p.colors:[],sizes:Array.isArray(p.sizes)?p.sizes:[],minStock:p.minStock??5,sold:p.unitsSold||0}));reconcileCart();renderProducts();renderAdmin();if($("overlay").dataset.mode==="cart")renderDrawer();} }catch{/* The clearly identified sample shop works without a configured server. */}}
   function setCategory(value){state.category=value;document.querySelectorAll(".filter-pill").forEach(b=>b.classList.toggle("active",b.dataset.filter===value));renderProducts();}
   function filteredProducts(){let rows=productList().filter(p=>p.status!=="Draft");if(state.category==="New arrivals")rows=rows.filter(p=>/landed/i.test(p.tag||""));else if(state.category!=="All")rows=rows.filter(p=>p.category===state.category);if(state.query){const q=state.query.toLowerCase();rows=rows.filter(p=>(p.name+" "+p.category+" "+p.sku).toLowerCase().includes(q));}if(state.sort==="price-low")rows.sort((a,b)=>(a.discountPrice??a.price)-(b.discountPrice??b.price));if(state.sort==="price-high")rows.sort((a,b)=>(b.discountPrice??b.price)-(a.discountPrice??a.price));return rows;}
-  function renderProducts(){const rows=filteredProducts();$("product-grid").innerHTML=rows.map(p=>`<article class="product-card"><div class="product-image-wrap"><img class="product-image" src="${esc(productImage(p.image,650))}" alt="${esc(p.name)}" loading="lazy"><span class="product-badge">${esc(p.tag||p.category)}</span><button class="wishlist-heart ${state.wishlist.has(p.id)?"selected":""}" data-wishlist="${esc(p.id)}" aria-label="${state.wishlist.has(p.id)?"Remove":"Add"} ${esc(p.name)} ${state.wishlist.has(p.id)?"from":"to"} wishlist">${state.wishlist.has(p.id)?"â™¥":"â™¡"}</button><button class="quick-add" data-add="${esc(p.id)}" ${p.stock===0?"disabled":""}>${p.stock===0?"A little sold out":"Add to your bag +"} </button></div><div class="product-meta"><button class="product-name product-detail-trigger" data-detail="${esc(p.id)}">${esc(p.name)}</button><span class="product-price">${rupees(p.discountPrice??p.price)}</span></div><div class="product-category">${esc(p.category)} Â· The Everyday Edit</div><div class="product-colors" aria-label="Available colours">${(p.colors||[]).slice(0,4).map(c=>`<span class="color-dot" style="background:${esc(c)}"></span>`).join("")}</div></article>`).join("");$("empty-state").classList.toggle("hidden",rows.length>0);$("product-grid").classList.toggle("hidden",rows.length===0);$("data-note").textContent=api.ready?"Live product availability. Prices shown in INR, inclusive of applicable taxes.":"A carefully chosen sample edit. The live catalog is temporarily unavailable.";}
+  function renderProducts(){const rows=filteredProducts();$("product-grid").innerHTML=rows.map(p=>`<article class="product-card"><div class="product-image-wrap"><img class="product-image" src="${esc(productImage(p.image,650))}" alt="${esc(p.name)}" loading="lazy"><span class="product-badge">${esc(p.tag||p.category)}</span><button class="wishlist-heart ${state.wishlist.has(p.id)?"selected":""}" data-wishlist="${esc(p.id)}" aria-label="${state.wishlist.has(p.id)?"Remove":"Add"} ${esc(p.name)} ${state.wishlist.has(p.id)?"from":"to"} wishlist">${state.wishlist.has(p.id)?"â™¥":"â™¡"}</button><button class="quick-add" data-add="${esc(p.id)}" ${p.stock===0?"disabled":""}>${p.stock===0?"A little sold out":"Add to your bag +"} </button></div><div class="product-meta"><button class="product-name product-detail-trigger" data-detail="${esc(p.id)}">${esc(p.name)}</button><span class="product-price">${rupees(p.discountPrice??p.price)}</span></div><div class="product-category">${esc(p.category)} Â· The Everyday Edit</div><div class="product-colors" aria-label="Available colours">${(p.colors||[]).slice(0,4).map(c=>`<span class="color-dot" style="background:${esc(c)}"></span>`).join("")}</div></article>`).join("");$("empty-state").classList.toggle("hidden",rows.length>0);$("product-grid").classList.toggle("hidden",rows.length===0);$("data-note").textContent=api.ready?"Live product availability. Prices shown in INR, inclusive of applicable taxes.":api.catalogEmpty?"The live catalog is empty. Showing sample products until items are added in the studio.":"A carefully chosen sample edit. The live catalog is temporarily unavailable.";}
   function orderLines(){return state.cart;}
   function cartCount(){return Object.values(orderLines()).reduce((n,q)=>n+q,0);}
   function updateCartCount(){$("cart-count").textContent=cartCount();$("cart-button").setAttribute("aria-label",`Open shopping bag, ${cartCount()} ${cartCount()===1?"item":"items"}`);saveCustomerState();}

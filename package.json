@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "create-owner": "node scripts/create-owner.js",
+    "change-owner": "node scripts/change-owner.js",
     "test": "node --test"
   },
   "dependencies": {

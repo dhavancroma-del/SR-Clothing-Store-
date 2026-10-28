@@ -15,6 +15,8 @@ npm start
 
 Open http://localhost:3000 for the storefront. The admin sign-in entry is hidden behind five quick clicks on either SR logo; the panel still requires an invited account, password, and authenticator code. The first Super Admin is created by the CLI and must enroll an authenticator before entering the panel. Keep `ADMIN_MFA_ENCRYPTION_KEY` private, stable, and separately backed up: losing it prevents decrypting enrolled MFA secrets. Set the exact trusted `APP_ORIGIN`; keep the SQLite database and `.env` private, and serve production behind HTTPS. Admin sessions expire after 20 minutes idle or 8 hours absolute.
 
+To change the single active Super Admin's email and password, run `npm run change-owner -- your-new-admin@example.com` in an interactive terminal on the machine hosting the database (or the Render Shell for a deployed database). Enter and confirm the new password at the hidden prompts; do not pass it as a command argument or share it in chat. The operation retains the existing authenticator enrollment and signs out all current sessions. Sign in again with the new email, password, and existing authenticator code.
+
 ## Publish a public preview on GitHub Pages
 
 The GitHub Actions workflow in `.github/workflows/deploy-pages.yml` automatically publishes the static files in `public/` to GitHub Pages whenever a commit is pushed to `main`. The preview URL for this repository is https://dhavancroma-del.github.io/SR-Clothing-Store-/; the first deployment can take a few minutes. Check the repository's **Actions** tab for the deployment status.
