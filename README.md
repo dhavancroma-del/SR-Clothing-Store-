@@ -23,6 +23,10 @@ The GitHub Actions workflow in `.github/workflows/deploy-pages.yml` automaticall
 
 GitHub Pages only hosts static files. It does **not** run the Node.js API, accept real orders, save owner changes, or serve the admin panel. Use the Render deployment below for the full application with persistent storage. Do not accept real orders through the static preview.
 
+## Publish a static preview on Vercel
+
+The `vercel.json` configuration publishes only the files in `public/`, so Vercel serves the storefront instead of trying to run the SQLite-backed Node.js server as a serverless function. Import this repository into Vercel and deploy the `main` branch, or push a new commit to trigger a deployment for an already connected project. This is a static preview: the live catalog API, checkout, and private admin panel require the full Render service described below.
+
 ## Publish on Render
 
 This project includes a Render Blueprint (`render.yaml`) that creates a Node.js web service and mounts a persistent disk for the private SQLite database. To publish it:
