@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- Keep the owner dashboard unindexed and load its private application styles. -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#171713">
@@ -14,6 +15,7 @@
   <link rel="stylesheet" href="responsive.css">
 </head>
 <body>
+  <!-- The sidebar switches between overview, products, orders, expenses, and reports. -->
   <div class="announcement">A little more considered. A little less ordinary. <span>Complimentary shipping on orders over ₹2,999</span></div>
   <header class="topbar">
     <button class="icon-button mobile-menu-button" id="mobile-menu-button" aria-label="Open navigation"><span class="menu-lines"></span></button>
@@ -63,6 +65,7 @@
   <main id="admin-view" class="admin-layout hidden">
     <aside class="admin-sidebar" id="admin-sidebar"><a href="#" class="admin-brand"><span class="brand-seal">S<span>R</span></span><span>SR <span class="wordmark-light">STUDIO</span><small>BUSINESS, BEAUTIFULLY</small></span></a><div class="sidebar-label">YOUR BUSINESS</div><nav class="dashboard-nav" aria-label="Dashboard navigation"><button class="dashboard-nav-item active" data-panel="overview"><span>◫</span> Overview</button><button class="dashboard-nav-item" data-panel="products"><span>▤</span> Products & stock</button><button class="dashboard-nav-item" data-panel="orders"><span>▧</span> Orders <span class="nav-count" id="pending-count">0</span></button><button class="dashboard-nav-item" data-panel="expenses"><span>₹</span> Expenses</button><button class="dashboard-nav-item" data-panel="reports"><span>↗</span> Reports</button></nav><div class="sidebar-bottom"><div class="owner-card"><span class="owner-avatar">SR</span><span><strong id="owner-name">Preview mode</strong><small id="owner-role">Sample business</small></span><span class="owner-online"></span></div><button class="sidebar-store-link" id="back-to-store">← &nbsp; Back to the store</button><button class="sidebar-store-link hidden" id="logout-button">↪ &nbsp; Sign out</button></div></aside>
     <section class="admin-content"><header class="admin-topbar"><div><button class="mobile-menu-button admin-mobile-menu" id="admin-menu-button" aria-label="Open dashboard navigation"><span class="menu-lines"></span></button><span class="breadcrumb">SR STUDIO &nbsp; / &nbsp; <strong id="breadcrumb-current">OVERVIEW</strong></span></div><div class="admin-top-actions"><span class="live-indicator"><span></span><span id="connection-label">DEMO PREVIEW</span></span><button class="button button-admin hidden" id="login-button">Owner sign in ↗</button></div></header>
+      <!-- Dashboard metrics and charts are the template rendered by the admin client. -->
       <div class="dashboard-page" id="dashboard-page">
         <div class="dashboard-title-row"><div><span class="eyebrow"><span class="gold-rule"></span> THE BIG PICTURE</span><h1 id="dashboard-heading">A good day to <i>begin.</i></h1><p id="dashboard-date">Here’s how things are looking.</p></div><div class="period-select-wrap"><span>THE PAST</span><select id="date-filter" aria-label="Select reporting period"><option value="30">30 DAYS</option><option value="7">7 DAYS</option><option value="365">12 MONTHS</option></select></div></div>
         <div class="demo-banner"><span>✳</span><div><strong id="demo-banner-title">YOU’RE TAKING A LOOK AROUND</strong><p id="demo-banner-text">These are illustrative sample figures, not your real business records. Sign in as the owner to manage real data.</p></div><button id="demo-banner-action">Make it yours ↗</button></div>

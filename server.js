@@ -1,5 +1,6 @@
 "use strict";
 
+// Configure the HTTP API, SQLite store, and MFA helpers used by the application.
 const crypto = require("node:crypto");
 const { promisify } = require("node:util");
 require("dotenv").config();
@@ -26,6 +27,7 @@ const idNumber = z.coerce.number().int().positive();
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const orderStatuses = ["Confirmed", "Processing", "Shipped", "Delivered", "Cancelled", "Refunded"];
 
+// Apply browser security headers, bounded JSON parsing, and endpoint rate limits.
 app.disable("x-powered-by");
 const trustedProxyHops = Number(process.env.TRUST_PROXY);
 app.set("trust proxy", Number.isInteger(trustedProxyHops) && trustedProxyHops > 0 ? trustedProxyHops : false);
@@ -63,6 +65,7 @@ const moneyToPaise = (value) => Math.round(value * 100);
 const paiseToRupees = (value) => Number((value / 100).toFixed(2));
 const fail = (status, message) => Object.assign(new Error(message), { status });
 
+// Convert request validation failures into consistent client-facing API errors.
 function validate(schema, value) {
   const result = schema.safeParse(value);
   if (!result.success) throw fail(400, result.error.issues.map((issue) => issue.message).join("; "));
@@ -77,6 +80,7 @@ function guardSameOrigin(req, res, next) {
 }
 app.use("/api", guardSameOrigin);
 
+// Read the session cookie and resolve its hashed token without storing raw tokens.
 function parseCookies(header = "") {
   return Object.fromEntries(header.split(";").map((part) => part.trim()).filter(Boolean).map((part) => {
     const i = part.indexOf("=");
@@ -103,6 +107,7 @@ function hidden(res) {
   return res.status(404).send("Not found");
 }
 function issueSession(user, mfaVerified) {
+  // Rotate random session and CSRF tokens, and remove expired or idle sessions.
   const now = new Date();
   const token = crypto.randomBytes(32).toString("hex");
   const csrfToken = crypto.randomBytes(32).toString("hex");
@@ -122,6 +127,7 @@ function sessionValid(session) {
     Date.parse(session.last_activity_at || 0) > now - IDLE_SESSION_MS;
 }
 function requireOwner(req, res, next) {
+  // Enforce IP rules, valid MFA, idle expiry, and CSRF protection for writes.
   if (!adminIpAllowed(req)) return hidden(res);
   const session = getSession(req);
   if (!sessionValid(session) || !["super_admin", "admin", "staff"].includes(session.role)) {
@@ -143,6 +149,7 @@ function requireOwner(req, res, next) {
   next();
 }
 function requirePermission(permission) {
+  // Assign role capabilities centrally and block staff-only forbidden operations.
   const rolePermissions = {
     super_admin: ["*"],
     admin: ["products.read", "products.write", "inventory.read", "inventory.adjust", "orders.read", "orders.update", "expenses.read", "expenses.write", "reports.read", "admins.read"],
@@ -179,6 +186,7 @@ function verifyPendingCsrf(req, res, next) {
   next();
 }
 function publicProduct(row) {
+  // Shape product rows for studio users, including operational fields.
   return {
     id: row.id, sku: row.sku, name: row.name, category: row.category, description: row.description,
     image: row.image, price: paiseToRupees(row.price_paise),
@@ -235,6 +243,7 @@ app.get("/api/auth/session", (req, res) => {
   });
 });
 
+// Authenticate passwords, upgrade legacy hashes, and establish an MFA-aware session.
 app.post("/api/auth/login", async (req, res, next) => {
   try {
     if (!adminIpAllowed(req)) return hidden(res);
@@ -287,6 +296,7 @@ app.post("/api/auth/logout", (req, res) => {
   res.clearCookie(COOKIE, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/" }).status(204).end();
 });
 
+// Enroll and verify an authenticator before granting a full owner session.
 app.get("/api/auth/mfa/setup", requirePendingMfa, (req, res, next) => {
   try {
     let secret = req.pendingAdmin.mfa_secret;
@@ -358,6 +368,7 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// Expose only active, stocked products and validate checkout against live inventory.
 app.get("/api/products", (req, res) => {
   const products = db.prepare("SELECT * FROM products WHERE status='Active' AND stock>0 ORDER BY id DESC").all().map(storefrontProduct);
   res.json({ products });
@@ -380,6 +391,7 @@ const createOrderBody = z.object({
   }
 });
 const createOrder = db.transaction((data) => {
+  // Validate every selected variant and reserve totals from the current product data.
   let subtotal = 0;
   const items = data.items.map(({ productId, quantity, size, color }) => {
     const p = db.prepare("SELECT * FROM products WHERE id=? AND status='Active'").get(productId);
@@ -413,6 +425,7 @@ app.post("/api/orders", (req, res, next) => {
   } catch (error) { next(error); }
 });
 
+// Calculate the owner dashboard's sales, costs, stock, and pending-order metrics.
 app.get("/api/admin/overview", requireOwner, requirePermission("reports.read"), (req, res) => {
   const range = Math.min(Math.max(Number(req.query.days) || 30, 1), 366);
   const since = new Date(Date.now() - range * 86400000).toISOString();
@@ -458,6 +471,7 @@ const productInput = z.object({
   supplier:z.string().max(200).optional().default(""),   colors:z.array(z.string().regex(/^#[0-9a-fA-F]{6}$/,"Use a six-digit hex colour, such as #b1a38e.")).max(12).optional().default([]),
   status:z.enum(["Active","Draft","Out of Stock"]).optional().default("Active")
 }).strict();
+// Create or update product records and track every inventory quantity adjustment.
 function saveProduct(p, existingId = null) {
   const now=new Date().toISOString(),cost=moneyToPaise(p.cost),price=moneyToPaise(p.price),discount=p.discountPrice==null?null:moneyToPaise(p.discountPrice);
   const sizes=p.category==="Accessories"?["One size"]:p.sizes;
@@ -481,6 +495,7 @@ function saveProduct(p, existingId = null) {
 app.post("/api/admin/products", requireOwner, requirePermission("products.write"), (req,res,next)=>{try{const p=validate(productInput,req.body);res.status(201).json({product:publicProduct(saveProduct(p))});}catch(e){next(e);}});
 app.patch("/api/admin/products/:id", requireOwner, requirePermission("products.write"), (req,res,next)=>{try{const p=validate(productInput.partial().strict(),req.body);const current=db.prepare("SELECT * FROM products WHERE id=?").get(idNumber.parse(req.params.id));if(!current)throw fail(404,"This product could not be found.");const merged={name:current.name,sku:current.sku,category:current.category,description:current.description,image:current.image,cost:paiseToRupees(current.cost_paise),price:paiseToRupees(current.price_paise),discountPrice:current.discount_paise===null?null:paiseToRupees(current.discount_paise),stock:current.stock,minStock:current.min_stock,supplier:current.supplier,status:current.status,colors:JSON.parse(current.colors_json),sizes:JSON.parse(current.sizes_json),...p};res.json({product:publicProduct(saveProduct(merged,current.id))});}catch(e){next(e);}});
 
+// Keep order transitions and stock reservations in a single database transaction.
 app.get("/api/admin/orders",requireOwner,requirePermission("orders.read"),(req,res)=>res.json({orders:db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 500").all().map(row=>presentAdminOrder(row,req.admin.role))}));
 const changeOrder = db.transaction((id,status,restock=false)=>{
   const order=db.prepare("SELECT * FROM orders WHERE id=?").get(id);
@@ -529,6 +544,7 @@ app.get("/api/admin/users", requireOwner, requirePermission("admins.read"), (req
   const users = db.prepare("SELECT id,email,role,is_active AS active,mfa_enabled AS mfaEnabled,created_at AS createdAt FROM users ORDER BY id").all();
   res.json({ users });
 });
+// Allow only Super Admins to issue one-use invitations and manage staff accounts.
 app.post("/api/admin/invitations", requireOwner, requireSuperAdmin, (req, res, next) => {
   try {
     const data = validate(z.object({
@@ -571,6 +587,7 @@ app.patch("/api/admin/users/:id", requireOwner, requireSuperAdmin, (req, res, ne
   } catch (error) { next(error); }
 });
 
+// Serve the private studio pages only after IP, session, and MFA checks pass.
 app.get("/admin", (req, res) => {
   if (!adminIpAllowed(req)) return hidden(res);
   const session = getSession(req);
@@ -598,6 +615,7 @@ app.get("/admin/invite", (req, res) => {
     .sendFile(require("node:path").join(ADMIN_DIR, "invite.html"));
 });
 
+// Publish storefront assets, hide unknown admin paths, and normalize API errors.
 app.use(express.static(require("node:path").join(__dirname,"public"),{index:"index.html",etag:true,maxAge:process.env.NODE_ENV==="production"?"1h":0}));
 app.get("/admin/*path", (req, res) => hidden(res));
 app.use("/api",(req,res)=>res.status(404).json({error:"This store service does not have that endpoint."}));
@@ -605,5 +623,6 @@ app.use((req,res)=>res.status(404).send("Not found"));
 app.use((error,req,res,next)=>{if(res.headersSent)return next(error);if(error.code==="SQLITE_CONSTRAINT_UNIQUE")return res.status(409).json({error:"That SKU or email is already in use."});if(error.code==="SQLITE_CONSTRAINT_CHECK")return res.status(400).json({error:"That value is outside the permitted range."});if(error instanceof SyntaxError&&"body" in error)return res.status(400).json({error:"Please send valid JSON."});if(error.name==="ZodError")return res.status(400).json({error:error.issues.map(i=>i.message).join("; ")});const status=Number.isInteger(error.status)?error.status:500;if(status>=500)console.error("SR CLOTHING request failed:",error);res.status(status).json({error:status>=500?"Something went wrong. Please try again.":error.message});});
 
 const port=Number(process.env.PORT)||3000;
+// Start listening only when invoked directly; tests import the configured Express app.
 if(require.main===module){app.listen(port,()=>console.log(`SR CLOTHING is ready at http://localhost:${port} · database: ${process.env.DB_PATH||"./data/sr-clothing.sqlite"}`));}
 module.exports={app,db};

@@ -1,3 +1,4 @@
+/* Keep shared media and dashboard tables within the available viewport. */
 img,
 svg {
   max-width: 100%;
@@ -40,6 +41,7 @@ body,
 }
 
 @media (max-width: 1100px) {
+  /* Convert the primary navigation and dashboard sidebar into compact menus. */
   .topbar {
     grid-template-columns: 40px minmax(0, 1fr) auto;
     gap: 14px;
@@ -115,6 +117,7 @@ body,
 }
 
 @media (max-width: 800px) {
+  /* Stack large storefront and reporting layouts on tablet-sized screens. */
   .announcement {
     display: flex;
     justify-content: center;
@@ -219,6 +222,7 @@ body,
 }
 
 @media (max-width: 560px) {
+  /* Reduce padding and simplify grids for narrow mobile screens. */
   .announcement {
     flex-wrap: wrap;
     gap: 3px 10px;
@@ -602,6 +606,7 @@ body,
 }
 
 @media (max-width: 360px) {
+  /* Protect the smallest viewport from clipped navigation and product controls. */
   .topbar {
     grid-template-columns: 26px minmax(0, 1fr) auto;
     gap: 4px;

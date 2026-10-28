@@ -1,8 +1,10 @@
 "use strict";
 
+// Track activity separately from the server-validated session expiration.
 let inactivityTimer;
 let lastActivityAt = Date.now();
 const resetInactivityTimer = () => {
+  // Lock the private dashboard after twenty minutes without user input.
   lastActivityAt = Date.now();
   clearTimeout(inactivityTimer);
   inactivityTimer = setTimeout(() => window.location.replace("/admin/login"), 20 * 60 * 1000);
@@ -12,6 +14,7 @@ const resetInactivityTimer = () => {
   document.addEventListener(eventName, resetInactivityTimer, { passive: true });
 });
 resetInactivityTimer();
+// Refresh active sessions while the dashboard is visible and recently used.
 setInterval(async () => {
   if (document.visibilityState !== "visible" || Date.now() - lastActivityAt >= 60 * 1000) return;
   try {
@@ -24,6 +27,7 @@ setInterval(async () => {
 }, 60 * 1000);
 
 document.addEventListener("click", async (event) => {
+  // Intercept sign-out to send the session's CSRF token before redirecting.
   const button = event.target.closest("#logout-button");
   if (!button) return;
   event.preventDefault();

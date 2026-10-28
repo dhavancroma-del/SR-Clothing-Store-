@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- Set browser metadata and load the shared storefront and dashboard styles. -->
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#171713">
@@ -13,6 +14,7 @@
   <link rel="stylesheet" href="responsive.css">
 </head>
 <body>
+  <!-- Storewide announcement and navigation remain visible on every customer page. -->
   <div class="announcement">A little more considered. A little less ordinary. <span>Complimentary shipping on orders over ₹2,999</span></div>
   <header class="topbar">
     <button class="icon-button mobile-menu-button" id="mobile-menu-button" aria-label="Open navigation" aria-controls="main-nav" aria-expanded="false"><span class="menu-lines"></span></button>
@@ -28,6 +30,7 @@
   </header>
 
   <main id="store-view">
+    <!-- Landing message and category links introduce the current collection. -->
     <section class="hero">
       <div class="hero-copy"><span class="eyebrow light-eyebrow"><span class="gold-rule"></span> THE EVERYDAY EDIT · VOL. 04</span><h1>Style that<br>defines <i>you.</i></h1><p>Discover premium fashion, timeless designs, and everyday luxury.</p><div class="hero-buttons"><a class="button button-gold" href="#shop">Shop now <span>↗</span></a><a class="text-link-light" href="#story">Explore collections <span>↗</span></a></div><div class="hero-foot"><span>01 — THOUGHTFUL BY DESIGN</span><span class="hero-slider">● <span>○</span> ○</span></div></div>
       <div class="hero-photo" role="img" aria-label="White checked button-down shirt"><div class="photo-note"><span>THE CHECKED<br>SHIRT EDIT</span><span class="note-arrow">↗</span></div><div class="hero-photo-index">THE SHIRT EDIT</div></div>
@@ -41,6 +44,7 @@
     </section>
 
     <section class="collection-section page-section" id="shop">
+      <!-- JavaScript fills this catalog grid and its filters from the active product list. -->
       <div class="section-heading"><div><span class="eyebrow"><span class="gold-rule"></span> A FEW GOOD THINGS</span><h2>Pieces to <i>keep.</i></h2><p class="section-subtitle">Chosen with intention. Worn on repeat.</p></div><a href="#shop" id="view-all" class="text-link">Browse everything <span>↗</span></a></div>
       <div class="shop-toolbar"><div class="filter-pills" role="group" aria-label="Filter by category"><button class="filter-pill active" data-filter="All">Everything</button><button class="filter-pill" data-filter="Men">For him</button><button class="filter-pill" data-filter="Women">For her</button><button class="filter-pill" data-filter="Accessories">Accessories</button></div><label class="shop-search-wrap"><span aria-hidden="true">⌕</span><input id="shop-search" type="search" aria-label="Search the collection" placeholder="Find a good thing"></label><label class="sort-label">SORT BY <select id="sort-select" aria-label="Sort products"><option value="featured">Just in</option><option value="price-low">Price: low to high</option><option value="price-high">Price: high to low</option></select></label></div>
       <div class="product-grid" id="product-grid" aria-live="polite"></div>

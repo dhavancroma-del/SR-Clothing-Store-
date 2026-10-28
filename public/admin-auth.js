@@ -1,6 +1,7 @@
 "use strict";
 
 (() => {
+  // Share one form handler across login, MFA enrollment, and invitation pages.
   const form = document.querySelector("form");
   if (!form) return;
   const error = document.getElementById("auth-error");
@@ -9,6 +10,7 @@
     : "";
   if (invitationToken) window.history.replaceState(null, "", "/admin/invite");
   const send = async (path, body, csrfToken) => {
+    // Keep requests same-origin and attach the one-time CSRF token when required.
     const response = await fetch(`/api${path}`, {
       method: "POST",
       credentials: "same-origin",
@@ -24,6 +26,7 @@
   };
   const showError = (reason) => { error.textContent = reason.message; };
 
+  // Authenticate staff and route first-time users to required MFA enrollment.
   if (form.id === "login-form") {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -40,6 +43,7 @@
     });
   }
 
+  // Load the pending MFA secret, then verify the first authenticator code.
   if (form.id === "mfa-form") {
     let csrfToken = "";
     fetch("/api/auth/mfa/setup", { credentials: "same-origin" })
@@ -60,6 +64,7 @@
     });
   }
 
+  // Accept one-time invitations only after matching the two password fields.
   if (form.id === "invite-form") {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();

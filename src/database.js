@@ -5,6 +5,7 @@ const path = require("node:path");
 const Database = require("better-sqlite3");
 
 function initializeDatabase() {
+  // Resolve the configured store file and ensure its parent directory exists.
   const filename = path.resolve(process.env.DB_PATH || "./data/sr-clothing.sqlite");
   fs.mkdirSync(path.dirname(filename), { recursive: true });
   const db = new Database(filename);
@@ -12,6 +13,7 @@ function initializeDatabase() {
   db.pragma("foreign_keys = ON");
   db.pragma("busy_timeout = 5000");
   db.exec(`
+    -- Accounts and sessions support role-based access and MFA-protected sign-in.
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       email TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -44,6 +46,7 @@ function initializeDatabase() {
       created_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS invitations_expiry ON admin_invitations(expires_at, accepted_at);
+    -- Product records keep all monetary values in paise to avoid rounding errors.
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       sku TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -94,6 +97,7 @@ function initializeDatabase() {
       UNIQUE (order_id, product_id, size, color)
     );
     CREATE INDEX IF NOT EXISTS order_created ON orders(created_at);
+    -- Order line snapshots preserve purchased prices and costs if products later change.
     CREATE TABLE IF NOT EXISTS expenses (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       category TEXT NOT NULL,
@@ -113,6 +117,7 @@ function initializeDatabase() {
       created_at TEXT NOT NULL
     );
   `);
+  // Apply additive migrations for databases created by earlier application versions.
   const userColumns = new Set(db.prepare("PRAGMA table_info(users)").all().map((column) => column.name));
   if (!userColumns.has("role")) db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'super_admin'");
   if (!userColumns.has("is_active")) db.exec("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1");

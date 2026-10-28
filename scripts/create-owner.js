@@ -5,15 +5,18 @@ const readline = require("node:readline");
 const { initializeDatabase } = require("../src/database");
 const { hashPassword } = require("../src/admin-security");
 
+// Use one readline interface for prompts and password entry.
 const input = readline.createInterface({ input: process.stdin, output: process.stdout });
 const ask = (question) => new Promise((resolve) => input.question(question, resolve));
 function askHidden(question) {
+  // Fall back to an ordinary prompt when the terminal cannot hide typed input.
   if (!process.stdin.isTTY || typeof process.stdin.setRawMode !== "function") {
     return ask(question);
   }
   return new Promise((resolve, reject) => {
     process.stdout.write(question);
     let password = "";
+    // Restore terminal state whether entry succeeds or the user cancels.
     const finish = () => {
       process.stdin.off("keypress", onKey);
       process.stdin.setRawMode(false);
@@ -21,6 +24,7 @@ function askHidden(question) {
       process.stdout.write("\n");
     };
     const onKey = (character, key = {}) => {
+      // Capture characters without echoing the password to the terminal.
       if (key.ctrl && key.name === "c") {
         finish();
         reject(new Error("Owner account creation was cancelled."));
@@ -42,6 +46,7 @@ function askHidden(question) {
 
 (async () => {
   try {
+    // Validate the initial owner credentials before creating the first account.
     const email = (await ask("Owner email: ")).trim().toLowerCase();
     const password = await askHidden("Owner password (at least 12 characters): ");
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -51,6 +56,7 @@ function askHidden(question) {
       throw new Error("Choose a password with at least 12 characters and no more than 72 UTF-8 bytes.");
     }
     const db = initializeDatabase();
+    // Registration is intentionally disabled once any account exists.
     if (db.prepare("SELECT 1 FROM users LIMIT 1").get()) {
       throw new Error("An owner account already exists. Account self-registration is disabled.");
     }
@@ -63,6 +69,7 @@ function askHidden(question) {
     console.log(`Super Admin account created for ${email}. Sign in to enroll an authenticator before using the panel.`);
     db.close();
   } catch (error) {
+    // Return a failing process status so deployment scripts can detect setup errors.
     console.error(`Owner account not created: ${error.message}`);
     process.exitCode = 1;
   } finally {
