@@ -8,16 +8,21 @@ const express = require("express");
 const helmet = require("helmet");
 const { rateLimit } = require("express-rate-limit");
 const { z } = require("zod");
-const { initializeDatabase } = require("./src/database");
+const { createRuntimeDatabase } = require("./src/runtime-database");
 const {
   decryptSecret, encryptSecret, hashPassword, ipAllowed, makeTotpSecret,
   verifyPassword, verifyTotp
 } = require("./src/admin-security");
 
 const app = express();
-const db = initializeDatabase();
+let db;
+const databaseReady = createRuntimeDatabase().then((database) => {
+  db = database;
+  return database;
+});
 const scrypt = promisify(crypto.scrypt);
-const APP_ORIGIN = process.env.APP_ORIGIN || process.env.RENDER_EXTERNAL_URL || "http://localhost:3000";
+const APP_ORIGIN = process.env.APP_ORIGIN || process.env.RENDER_EXTERNAL_URL ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000");
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const IDLE_SESSION_MS = 20 * 60 * 1000;
 const COOKIE = "sr_owner";
@@ -79,6 +84,9 @@ function guardSameOrigin(req, res, next) {
   return next();
 }
 app.use("/api", guardSameOrigin);
+app.use((req, res, next) => {
+  databaseReady.then(() => next()).catch(next);
+});
 
 // Read the session cookie and resolve its hashed token without storing raw tokens.
 function parseCookies(header = "") {
@@ -91,7 +99,7 @@ function rawSessionToken(req) {
   const raw = parseCookies(req.get("cookie"))[COOKIE];
   return raw && /^[a-f0-9]{64}$/.test(raw) ? raw : null;
 }
-function getSession(req) {
+async function getSession(req) {
   const raw = rawSessionToken(req);
   if (!raw) return null;
   return db.prepare(`
@@ -106,15 +114,15 @@ function adminIpAllowed(req) {
 function hidden(res) {
   return res.status(404).send("Not found");
 }
-function issueSession(user, mfaVerified) {
+async function issueSession(user, mfaVerified) {
   // Rotate random session and CSRF tokens, and remove expired or idle sessions.
   const now = new Date();
   const token = crypto.randomBytes(32).toString("hex");
   const csrfToken = crypto.randomBytes(32).toString("hex");
   const expires = new Date(now.getTime() + SESSION_MS).toISOString();
-  db.prepare("DELETE FROM sessions WHERE expires_at<=? OR last_activity_at<=?")
+  await db.prepare("DELETE FROM sessions WHERE expires_at<=? OR last_activity_at<=?")
     .run(now.toISOString(), new Date(now.getTime() - IDLE_SESSION_MS).toISOString());
-  db.prepare(`INSERT INTO sessions
+  await db.prepare(`INSERT INTO sessions
     (token_hash,user_id,expires_at,last_activity_at,csrf_token,mfa_verified)
     VALUES (?,?,?,?,?,?)`)
     .run(sha256(token), user.id, expires, now.toISOString(), csrfToken, mfaVerified ? 1 : 0);
@@ -126,12 +134,12 @@ function sessionValid(session) {
   return Date.parse(session.expires_at) > now &&
     Date.parse(session.last_activity_at || 0) > now - IDLE_SESSION_MS;
 }
-function requireOwner(req, res, next) {
+async function requireOwner(req, res, next) {
   // Enforce IP rules, valid MFA, idle expiry, and CSRF protection for writes.
   if (!adminIpAllowed(req)) return hidden(res);
-  const session = getSession(req);
+  const session = await getSession(req);
   if (!sessionValid(session) || !["super_admin", "admin", "staff"].includes(session.role)) {
-    if (session) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(session.token_hash);
+    if (session) await db.prepare("DELETE FROM sessions WHERE token_hash=?").run(session.token_hash);
     res.clearCookie(COOKIE, cookieOptions);
     return hidden(res);
   }
@@ -144,7 +152,7 @@ function requireOwner(req, res, next) {
     }
   }
   const activity = new Date().toISOString();
-  db.prepare("UPDATE sessions SET last_activity_at=? WHERE token_hash=?").run(activity, session.token_hash);
+  await db.prepare("UPDATE sessions SET last_activity_at=? WHERE token_hash=?").run(activity, session.token_hash);
   req.admin = { id: session.id, email: session.email, role: session.role, session };
   next();
 }
@@ -170,9 +178,9 @@ function requireSuperAdmin(req, res, next) {
   if (req.admin?.role !== "super_admin") return res.status(403).json({ error: "Super Admin access is required." });
   next();
 }
-function requirePendingMfa(req, res, next) {
+async function requirePendingMfa(req, res, next) {
   if (!adminIpAllowed(req)) return hidden(res);
-  const session = getSession(req);
+  const session = await getSession(req);
   if (!sessionValid(session) || session.mfa_enabled || session.mfa_verified) return hidden(res);
   req.pendingAdmin = session;
   next();
@@ -205,13 +213,13 @@ function storefrontProduct(row) {
     tag: row.stock <= row.min_stock ? "LOW STOCK" : "THOUGHTFULLY CHOSEN"
   };
 }
-function ownerProductQuery() { return db.prepare("SELECT * FROM products ORDER BY id DESC").all(); }
-function presentOrder(row) {
-  const items = db.prepare("SELECT product_id AS productId, sku, name, size, color, quantity, unit_price_paise AS unitPrice, unit_cost_paise AS unitCost FROM order_items WHERE order_id = ?").all(row.id).map((i) => ({
+async function ownerProductQuery() { return db.prepare("SELECT * FROM products ORDER BY id DESC").all(); }
+async function presentOrder(row) {
+  const items = (await db.prepare("SELECT product_id AS productId, sku, name, size, color, quantity, unit_price_paise AS unitPrice, unit_cost_paise AS unitCost FROM order_items WHERE order_id = ?").all(row.id)).map((i) => ({
     productId: i.productId, sku: i.sku, name: i.name, size: i.size, color: i.color, quantity: i.quantity, price: paiseToRupees(i.unitPrice),
     cost: paiseToRupees(i.unitCost)
   }));
-  const cogs = db.prepare("SELECT COALESCE(SUM(unit_cost_paise * quantity),0) AS amount FROM order_items WHERE order_id = ?").get(row.id).amount;
+  const { amount: cogs } = await db.prepare("SELECT COALESCE(SUM(unit_cost_paise * quantity),0) AS amount FROM order_items WHERE order_id = ?").get(row.id);
   return {
     id: row.id, customerName: row.customer_name, email: row.email, phone: row.phone,
     address: row.address, paymentMethod: row.payment_method, paymentStatus: row.payment_status,
@@ -220,21 +228,21 @@ function presentOrder(row) {
     reserved: Boolean(row.reserved), items, cogs: paiseToRupees(cogs), createdAt: row.created_at
   };
 }
-function customerOrderConfirmation(row) {
-  const { cogs, ...order } = presentOrder(row);
+async function customerOrderConfirmation(row) {
+  const { cogs, ...order } = await presentOrder(row);
   return { ...order, items: order.items.map(({ cost, ...item }) => item) };
 }
-function presentAdminOrder(row, role) {
+async function presentAdminOrder(row, role) {
   return role === "staff" ? customerOrderConfirmation(row) : presentOrder(row);
 }
 
-app.get("/api/auth/session", (req, res) => {
-  const row = getSession(req);
+app.get("/api/auth/session", async (req, res) => {
+  const row = await getSession(req);
   if (!sessionValid(row) || !adminIpAllowed(req)) {
-    if (row) db.prepare("DELETE FROM sessions WHERE token_hash=?").run(row.token_hash);
+    if (row) await db.prepare("DELETE FROM sessions WHERE token_hash=?").run(row.token_hash);
     return res.json({ user: null });
   }
-  db.prepare("UPDATE sessions SET last_activity_at=? WHERE token_hash=?").run(new Date().toISOString(), row.token_hash);
+  await db.prepare("UPDATE sessions SET last_activity_at=? WHERE token_hash=?").run(new Date().toISOString(), row.token_hash);
   res.json({
     user: row.mfa_enabled && row.mfa_verified
       ? { email: row.email, role: row.role, mfaEnabled: true, mfaVerified: true }
@@ -252,7 +260,7 @@ app.post("/api/auth/login", async (req, res, next) => {
       password: z.string().min(1).max(72).refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password must be at most 72 UTF-8 bytes."),
       otp: z.string().regex(/^\d{6}$/).optional()
     }).strict(), req.body);
-    const user = db.prepare("SELECT * FROM users WHERE email=?").get(data.email);
+    const user = await db.prepare("SELECT * FROM users WHERE email=?").get(data.email);
     let passwordMatches = false;
     if (user?.is_active && /^\$2[aby]\$/.test(user.password_hash)) {
       passwordMatches = await verifyPassword(data.password, user.password_hash);
@@ -262,7 +270,7 @@ app.post("/api/auth/login", async (req, res, next) => {
       passwordMatches = candidate.length === stored.length && crypto.timingSafeEqual(candidate, stored);
       if (passwordMatches) {
         const upgradedHash = await hashPassword(data.password);
-        db.prepare("UPDATE users SET password_hash=?,password_salt='' WHERE id=?").run(upgradedHash, user.id);
+        await db.prepare("UPDATE users SET password_hash=?,password_salt='' WHERE id=?").run(upgradedHash, user.id);
       }
     }
     if (!passwordMatches) {
@@ -271,7 +279,7 @@ app.post("/api/auth/login", async (req, res, next) => {
     if (user.mfa_enabled && (!data.otp || !verifyTotp(decryptSecret(user.mfa_secret), data.otp))) {
       throw fail(401, "That email, password, or authenticator code isn’t quite right.");
     }
-    const session = issueSession(user, Boolean(user.mfa_enabled));
+    const session = await issueSession(user, Boolean(user.mfa_enabled));
     res.cookie(COOKIE, session.token, cookieOptions).json({
       user: { email: user.email, role: user.role, mfaEnabled: Boolean(user.mfa_enabled) },
       csrfToken: session.csrfToken,
@@ -280,29 +288,29 @@ app.post("/api/auth/login", async (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post("/api/auth/logout", (req, res) => {
+app.post("/api/auth/logout", async (req, res) => {
   const raw = rawSessionToken(req);
   if (raw) {
-    const session = db.prepare("SELECT csrf_token FROM sessions WHERE token_hash=?").get(sha256(raw));
+    const session = await db.prepare("SELECT csrf_token FROM sessions WHERE token_hash=?").get(sha256(raw));
     if (session) {
       const supplied = Buffer.from(req.get("x-csrf-token") || "");
       const expected = Buffer.from(session.csrf_token || "");
       if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
         return res.status(403).json({ error: "This request could not be verified. Reload the page and try again." });
       }
-      db.prepare("DELETE FROM sessions WHERE token_hash=?").run(sha256(raw));
+      await db.prepare("DELETE FROM sessions WHERE token_hash=?").run(sha256(raw));
     }
   }
   res.clearCookie(COOKIE, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "strict", path: "/" }).status(204).end();
 });
 
 // Enroll and verify an authenticator before granting a full owner session.
-app.get("/api/auth/mfa/setup", requirePendingMfa, (req, res, next) => {
+app.get("/api/auth/mfa/setup", requirePendingMfa, async (req, res, next) => {
   try {
     let secret = req.pendingAdmin.mfa_secret;
     if (!secret) {
       secret = encryptSecret(makeTotpSecret());
-      db.prepare("UPDATE users SET mfa_secret=? WHERE id=?").run(secret, req.pendingAdmin.id);
+      await db.prepare("UPDATE users SET mfa_secret=? WHERE id=?").run(secret, req.pendingAdmin.id);
     }
     const plain = decryptSecret(secret);
     const label = encodeURIComponent(`SR CLOTHING:${req.pendingAdmin.email}`);
@@ -315,19 +323,19 @@ app.get("/api/auth/mfa/setup", requirePendingMfa, (req, res, next) => {
   } catch (error) { next(error); }
 });
 
-app.post("/api/auth/mfa/verify", requirePendingMfa, verifyPendingCsrf, (req, res, next) => {
+app.post("/api/auth/mfa/verify", requirePendingMfa, verifyPendingCsrf, async (req, res, next) => {
   try {
     const { otp } = validate(z.object({ otp: z.string().regex(/^\d{6}$/) }).strict(), req.body);
-    const user = db.prepare("SELECT * FROM users WHERE id=?").get(req.pendingAdmin.id);
+    const user = await db.prepare("SELECT * FROM users WHERE id=?").get(req.pendingAdmin.id);
     if (!user.mfa_secret || !verifyTotp(decryptSecret(user.mfa_secret), otp)) {
       throw fail(400, "That authenticator code is not valid. Check your device clock and try again.");
     }
     const csrfToken = crypto.randomBytes(32).toString("hex");
     const now = new Date().toISOString();
-    db.transaction(() => {
-      db.prepare("UPDATE users SET mfa_enabled=1 WHERE id=?").run(user.id);
-      db.prepare("DELETE FROM sessions WHERE user_id=? AND token_hash!=?").run(user.id, req.pendingAdmin.token_hash);
-      db.prepare("UPDATE sessions SET mfa_verified=1,csrf_token=?,last_activity_at=? WHERE token_hash=?")
+    await db.transaction(async (tx) => {
+      await tx.prepare("UPDATE users SET mfa_enabled=1 WHERE id=?").run(user.id);
+      await tx.prepare("DELETE FROM sessions WHERE user_id=? AND token_hash!=?").run(user.id, req.pendingAdmin.token_hash);
+      await tx.prepare("UPDATE sessions SET mfa_verified=1,csrf_token=?,last_activity_at=? WHERE token_hash=?")
         .run(csrfToken, now, req.pendingAdmin.token_hash);
     })();
     res.json({ user: { email: user.email, role: user.role, mfaEnabled: true }, csrfToken });
@@ -342,25 +350,25 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
       password: z.string().min(12).max(72).refine((value) => Buffer.byteLength(value, "utf8") <= 72, "Password must be at most 72 UTF-8 bytes.")
     }).strict(), req.body);
     const tokenHash = sha256(input.token);
-    const invitation = db.prepare("SELECT * FROM admin_invitations WHERE token_hash=? AND accepted_at IS NULL AND expires_at>?")
+    const invitation = await db.prepare("SELECT * FROM admin_invitations WHERE token_hash=? AND accepted_at IS NULL AND expires_at>?")
       .get(tokenHash, new Date().toISOString());
     if (!invitation) throw fail(400, "This invitation is invalid or has expired.");
-    if (db.prepare("SELECT 1 FROM users WHERE email=?").get(invitation.email)) {
+    if (await db.prepare("SELECT 1 FROM users WHERE email=?").get(invitation.email)) {
       throw fail(409, "An account already exists for this invitation.");
     }
     const passwordHash = await hashPassword(input.password);
     const now = new Date().toISOString();
-    const accept = db.transaction(() => {
-      const current = db.prepare("SELECT * FROM admin_invitations WHERE id=? AND accepted_at IS NULL AND expires_at>?").get(invitation.id, now);
+    const accept = await db.transaction(async (tx) => {
+      const current = await tx.prepare("SELECT * FROM admin_invitations WHERE id=? AND accepted_at IS NULL AND expires_at>?").get(invitation.id, now);
       if (!current) throw fail(409, "This invitation has already been used or has expired.");
-      const result = db.prepare(`INSERT INTO users
+      const result = await tx.prepare(`INSERT INTO users
         (email,password_hash,password_salt,role,is_active,created_at)
         VALUES (?,?, '', ?,1,?)`).run(current.email, passwordHash, current.role, now);
-      db.prepare("UPDATE admin_invitations SET accepted_at=? WHERE id=?").run(now, current.id);
+      await tx.prepare("UPDATE admin_invitations SET accepted_at=? WHERE id=?").run(now, current.id);
       return { id: result.lastInsertRowid, email: current.email, role: current.role };
     });
-    const user = accept();
-    const session = issueSession(user, false);
+    const user = await accept();
+    const session = await issueSession(user, false);
     res.cookie(COOKIE, session.token, cookieOptions).status(201).json({
       user: { email: user.email, role: user.role, mfaEnabled: false },
       csrfToken: session.csrfToken
@@ -369,8 +377,8 @@ app.post("/api/auth/invitations/accept", async (req, res, next) => {
 });
 
 // Expose only active, stocked products and validate checkout against live inventory.
-app.get("/api/products", (req, res) => {
-  const products = db.prepare("SELECT * FROM products WHERE status='Active' AND stock>0 ORDER BY id DESC").all().map(storefrontProduct);
+app.get("/api/products", async (req, res) => {
+  const products = (await db.prepare("SELECT * FROM products WHERE status='Active' AND stock>0 ORDER BY id DESC").all()).map(storefrontProduct);
   res.json({ products });
 });
 
@@ -390,76 +398,77 @@ const createOrderBody = z.object({
     ctx.addIssue({ code: "custom", path: ["items"], message: "Remove duplicate items from your bag before checkout." });
   }
 });
-const createOrder = db.transaction((data) => {
+const createOrder = async (data) => db.transaction(async (tx) => {
   // Validate every selected variant and reserve totals from the current product data.
   let subtotal = 0;
-  const items = data.items.map(({ productId, quantity, size, color }) => {
-    const p = db.prepare("SELECT * FROM products WHERE id=? AND status='Active'").get(productId);
+  const items = [];
+  for (const { productId, quantity, size, color } of data.items) {
+    const p = await tx.prepare("SELECT * FROM products WHERE id=? AND status='Active'").get(productId);
     if (!p) throw fail(400, "One of the pieces in your bag is no longer available. Please refresh your bag.");
     if (p.stock < quantity) throw fail(409, `${p.name} has only ${p.stock} piece${p.stock === 1 ? "" : "s"} left.`);
     if (!JSON.parse(p.sizes_json).includes(size)) throw fail(400, `That size is no longer available for ${p.name}.`);
     if (JSON.parse(p.colors_json).length && !JSON.parse(p.colors_json).includes(color)) throw fail(400, `That colour is no longer available for ${p.name}.`);
     const unitPrice = p.discount_paise ?? p.price_paise;
     subtotal += unitPrice * quantity;
-    return { product: p, quantity, unitPrice, size, color };
-  });
+    items.push({ product: p, quantity, unitPrice, size, color });
+  }
   const quantitiesByProduct = new Map();
   for (const item of items) quantitiesByProduct.set(item.product.id, (quantitiesByProduct.get(item.product.id)||0)+item.quantity);
   for (const [productId,quantity] of quantitiesByProduct) {
-    const p=db.prepare("SELECT name,stock FROM products WHERE id=?").get(productId);
+    const p = await tx.prepare("SELECT name,stock FROM products WHERE id=?").get(productId);
     if(p.stock<quantity)throw fail(409,`${p.name} has only ${p.stock} piece${p.stock===1?"":"s"} left across its selected sizes.`);
   }
   const shipping = subtotal >= 299900 ? 0 : (subtotal ? 9900 : 0);
   const now = new Date();
   const id = `SR-${now.toISOString().slice(2, 10).replace(/-/g, "")}-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
-  db.prepare(`INSERT INTO orders (id,customer_name,email,phone,address,payment_method,payment_status,status,subtotal_paise,shipping_paise,discount_paise,total_paise,created_at) VALUES (?,?,?,?,?,?,?,'Pending',?,?,?,?,?)`)
+  await tx.prepare(`INSERT INTO orders (id,customer_name,email,phone,address,payment_method,payment_status,status,subtotal_paise,shipping_paise,discount_paise,total_paise,created_at) VALUES (?,?,?,?,?,?,?,'Pending',?,?,?,?,?)`)
     .run(id,data.customerName,data.email,data.phone,data.address,data.paymentMethod,"Unpaid",subtotal,shipping,0,subtotal+shipping,now.toISOString());
-  const insert = db.prepare("INSERT INTO order_items (order_id,product_id,sku,name,size,color,quantity,unit_price_paise,unit_cost_paise) VALUES (?,?,?,?,?,?,?,?,?)");
-  for (const item of items) insert.run(id,item.product.id,item.product.sku,item.product.name,item.size,item.color,item.quantity,item.unitPrice,item.product.cost_paise);
-  return db.prepare("SELECT * FROM orders WHERE id=?").get(id);
-});
-app.post("/api/orders", (req, res, next) => {
+  const insert = tx.prepare("INSERT INTO order_items (order_id,product_id,sku,name,size,color,quantity,unit_price_paise,unit_cost_paise) VALUES (?,?,?,?,?,?,?,?,?)");
+  for (const item of items) await insert.run(id,item.product.id,item.product.sku,item.product.name,item.size,item.color,item.quantity,item.unitPrice,item.product.cost_paise);
+  return tx.prepare("SELECT * FROM orders WHERE id=?").get(id);
+})();
+app.post("/api/orders", async (req, res, next) => {
   try {
     const data = validate(createOrderBody, req.body);
-    res.status(201).json({ order: customerOrderConfirmation(createOrder(data)), message: "Order placed and awaiting owner confirmation." });
+    res.status(201).json({ order: await customerOrderConfirmation(await createOrder(data)), message: "Order placed and awaiting owner confirmation." });
   } catch (error) { next(error); }
 });
 
 // Calculate the owner dashboard's sales, costs, stock, and pending-order metrics.
-app.get("/api/admin/overview", requireOwner, requirePermission("reports.read"), (req, res) => {
+app.get("/api/admin/overview", requireOwner, requirePermission("reports.read"), async (req, res) => {
   const range = Math.min(Math.max(Number(req.query.days) || 30, 1), 366);
   const since = new Date(Date.now() - range * 86400000).toISOString();
   const monthStart = `${new Date().toISOString().slice(0, 7)}-01`;
-  const sales = db.prepare(`
+  const sales = await db.prepare(`
     SELECT COALESCE(SUM(total_paise),0) revenue, COUNT(*) orders
     FROM orders WHERE status='Delivered' AND created_at>=?
   `).get(since);
-  const cogs = db.prepare(`
+  const { total: cogs } = await db.prepare(`
     SELECT COALESCE(SUM(oi.unit_cost_paise * oi.quantity),0) AS total
     FROM order_items oi JOIN orders o ON o.id=oi.order_id
     WHERE o.status='Delivered' AND o.created_at>=?
-  `).get(since).total;
-  const expenses = db.prepare("SELECT COALESCE(SUM(amount_paise),0) total FROM expenses WHERE date>=?").get(since.slice(0, 10)).total;
-  const inventory = db.prepare("SELECT COALESCE(SUM(stock * cost_paise),0) total, COUNT(*) products, COALESCE(SUM(stock),0) units, SUM(stock<=min_stock AND stock>0) low FROM products WHERE status!='Draft'").get();
-  const orders = db.prepare("SELECT COUNT(*) AS count FROM orders WHERE status IN ('Pending','Confirmed','Processing','Shipped')").get().count;
-  const delivered = db.prepare("SELECT COUNT(*) AS count FROM orders WHERE status='Delivered' AND created_at>=?").get(since).count;
+  `).get(since);
+  const { total: expenses } = await db.prepare("SELECT COALESCE(SUM(amount_paise),0) total FROM expenses WHERE date>=?").get(since.slice(0, 10));
+  const inventory = await db.prepare("SELECT COALESCE(SUM(stock * cost_paise),0) total, COUNT(*) products, COALESCE(SUM(stock),0) units, SUM(stock<=min_stock AND stock>0) low FROM products WHERE status!='Draft'").get();
+  const { count: orders } = await db.prepare("SELECT COUNT(*) AS count FROM orders WHERE status IN ('Pending','Confirmed','Processing','Shipped')").get();
+  const { count: delivered } = await db.prepare("SELECT COUNT(*) AS count FROM orders WHERE status='Delivered' AND created_at>=?").get(since);
   const today = new Date().toISOString().slice(0, 10);
-  const todaySales = db.prepare("SELECT COALESCE(SUM(total_paise),0) total FROM orders WHERE status='Delivered' AND substr(created_at,1,10)=?").get(today).total;
-  const monthSales = db.prepare("SELECT COALESCE(SUM(total_paise),0) total FROM orders WHERE status='Delivered' AND substr(created_at,1,10)>=?").get(monthStart).total;
+  const { total: todaySales } = await db.prepare("SELECT COALESCE(SUM(total_paise),0) total FROM orders WHERE status='Delivered' AND substr(created_at,1,10)=?").get(today);
+  const { total: monthSales } = await db.prepare("SELECT COALESCE(SUM(total_paise),0) total FROM orders WHERE status='Delivered' AND substr(created_at,1,10)>=?").get(monthStart);
   res.json({
     periodDays: range, salesToday: paiseToRupees(todaySales), salesThisMonth: paiseToRupees(monthSales), revenue: paiseToRupees(sales.revenue),
     purchaseCost: paiseToRupees(cogs), grossProfit: paiseToRupees(sales.revenue-cogs),
     expenses: paiseToRupees(expenses), netProfit: paiseToRupees(sales.revenue-cogs-expenses),
-    unitsSold: db.prepare("SELECT COALESCE(SUM(oi.quantity),0) total FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.status='Delivered' AND o.created_at>=?").get(since).total,
+    unitsSold: Number((await db.prepare("SELECT COALESCE(SUM(oi.quantity),0) total FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE o.status='Delivered' AND o.created_at>=?").get(since)).total),
     inventoryValue: paiseToRupees(inventory.total), products: inventory.products, stockUnits: inventory.units,
     lowStock: inventory.low||0, pendingOrders: orders, deliveredOrders: delivered,
-    openOrders: db.prepare("SELECT COUNT(*) total FROM orders WHERE status='Pending'").get().total,
-    completedOrders: db.prepare("SELECT COUNT(*) total FROM orders WHERE status='Delivered'").get().total
+    openOrders: Number((await db.prepare("SELECT COUNT(*) total FROM orders WHERE status='Pending'").get()).total),
+    completedOrders: Number((await db.prepare("SELECT COUNT(*) total FROM orders WHERE status='Delivered'").get()).total)
   });
 });
 
-app.get("/api/admin/products", requireOwner, requirePermission("products.read"), (req, res) => {
-  res.json({ products: ownerProductQuery().map((p) => ({ ...publicProduct(p), status: p.status })) });
+app.get("/api/admin/products", requireOwner, requirePermission("products.read"), async (req, res) => {
+  res.json({ products: (await ownerProductQuery()).map((p) => ({ ...publicProduct(p), status: p.status })) });
 });
 const productInput = z.object({
   name:z.string().trim().min(1).max(120), sku:z.string().trim().min(1).max(40),
@@ -472,33 +481,33 @@ const productInput = z.object({
   status:z.enum(["Active","Draft","Out of Stock"]).optional().default("Active")
 }).strict();
 // Create or update product records and track every inventory quantity adjustment.
-function saveProduct(p, existingId = null) {
+async function saveProduct(p, existingId = null) {
   const now=new Date().toISOString(),cost=moneyToPaise(p.cost),price=moneyToPaise(p.price),discount=p.discountPrice==null?null:moneyToPaise(p.discountPrice);
   const sizes=p.category==="Accessories"?["One size"]:p.sizes;
   if(discount!==null&&discount>price)throw fail(400,"A discount price cannot be higher than the regular selling price.");
   const status=p.status==="Draft"?"Draft":p.stock===0?"Out of Stock":"Active";
   if(existingId){
-    const current=db.prepare("SELECT * FROM products WHERE id=?").get(existingId);
+    const current=await db.prepare("SELECT * FROM products WHERE id=?").get(existingId);
     if(!current)throw fail(404,"This product could not be found.");
     const change=p.stock-current.stock;
-    db.prepare(`UPDATE products SET sku=?,name=?,category=?,description=?,image=?,cost_paise=?,price_paise=?,discount_paise=?,stock=?,min_stock=?,supplier=?,status=?,colors_json=?,sizes_json=?,updated_at=? WHERE id=?`)
+    await db.prepare(`UPDATE products SET sku=?,name=?,category=?,description=?,image=?,cost_paise=?,price_paise=?,discount_paise=?,stock=?,min_stock=?,supplier=?,status=?,colors_json=?,sizes_json=?,updated_at=? WHERE id=?`)
       .run(p.sku,p.name,p.category,p.description,p.image,cost,price,discount,p.stock,p.minStock,p.supplier,status,JSON.stringify(p.colors),JSON.stringify(sizes),now,existingId);
-    if(change)db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,created_at) VALUES (?,?,?,?,?)")
+    if(change)await db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,created_at) VALUES (?,?,?,?,?)")
       .run(existingId,p.sku,change,"Manual stock adjustment",now);
     return db.prepare("SELECT * FROM products WHERE id=?").get(existingId);
   }
-  const result=db.prepare(`INSERT INTO products (sku,name,category,description,image,cost_paise,price_paise,discount_paise,stock,min_stock,supplier,status,colors_json,sizes_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+  const result=await db.prepare(`INSERT INTO products (sku,name,category,description,image,cost_paise,price_paise,discount_paise,stock,min_stock,supplier,status,colors_json,sizes_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .run(p.sku,p.name,p.category,p.description,p.image,cost,price,discount,p.stock,p.minStock,p.supplier,status,JSON.stringify(p.colors),JSON.stringify(sizes),now,now);
-  if(p.stock)db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,created_at) VALUES (?,?,?,?,?)").run(result.lastInsertRowid,p.sku,p.stock,"Initial stock receipt",now);
+  if(p.stock)await db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,created_at) VALUES (?,?,?,?,?)").run(result.lastInsertRowid,p.sku,p.stock,"Initial stock receipt",now);
   return db.prepare("SELECT * FROM products WHERE id=?").get(result.lastInsertRowid);
 }
-app.post("/api/admin/products", requireOwner, requirePermission("products.write"), (req,res,next)=>{try{const p=validate(productInput,req.body);res.status(201).json({product:publicProduct(saveProduct(p))});}catch(e){next(e);}});
-app.patch("/api/admin/products/:id", requireOwner, requirePermission("products.write"), (req,res,next)=>{try{const p=validate(productInput.partial().strict(),req.body);const current=db.prepare("SELECT * FROM products WHERE id=?").get(idNumber.parse(req.params.id));if(!current)throw fail(404,"This product could not be found.");const merged={name:current.name,sku:current.sku,category:current.category,description:current.description,image:current.image,cost:paiseToRupees(current.cost_paise),price:paiseToRupees(current.price_paise),discountPrice:current.discount_paise===null?null:paiseToRupees(current.discount_paise),stock:current.stock,minStock:current.min_stock,supplier:current.supplier,status:current.status,colors:JSON.parse(current.colors_json),sizes:JSON.parse(current.sizes_json),...p};res.json({product:publicProduct(saveProduct(merged,current.id))});}catch(e){next(e);}});
+app.post("/api/admin/products", requireOwner, requirePermission("products.write"), async (req,res,next)=>{try{const p=validate(productInput,req.body);res.status(201).json({product:publicProduct(await saveProduct(p))});}catch(e){next(e);}});
+app.patch("/api/admin/products/:id", requireOwner, requirePermission("products.write"), async (req,res,next)=>{try{const p=validate(productInput.partial().strict(),req.body);const current=await db.prepare("SELECT * FROM products WHERE id=?").get(idNumber.parse(req.params.id));if(!current)throw fail(404,"This product could not be found.");const merged={name:current.name,sku:current.sku,category:current.category,description:current.description,image:current.image,cost:paiseToRupees(current.cost_paise),price:paiseToRupees(current.price_paise),discountPrice:current.discount_paise===null?null:paiseToRupees(current.discount_paise),stock:current.stock,minStock:current.min_stock,supplier:current.supplier,status:current.status,colors:JSON.parse(current.colors_json),sizes:JSON.parse(current.sizes_json),...p};res.json({product:publicProduct(await saveProduct(merged,current.id))});}catch(e){next(e);}});
 
 // Keep order transitions and stock reservations in a single database transaction.
-app.get("/api/admin/orders",requireOwner,requirePermission("orders.read"),(req,res)=>res.json({orders:db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 500").all().map(row=>presentAdminOrder(row,req.admin.role))}));
-const changeOrder = db.transaction((id,status,restock=false)=>{
-  const order=db.prepare("SELECT * FROM orders WHERE id=?").get(id);
+app.get("/api/admin/orders",requireOwner,requirePermission("orders.read"),async (req,res)=>res.json({orders:await Promise.all((await db.prepare("SELECT * FROM orders ORDER BY created_at DESC LIMIT 500").all()).map(row=>presentAdminOrder(row,req.admin.role)))}));
+const changeOrder = (id,status,restock=false)=>db.transaction(async (tx)=>{
+  const order=await tx.prepare("SELECT * FROM orders WHERE id=?").get(id);
   if(!order)throw fail(404,"This order could not be found.");
   if(order.status===status)return order;
   const transitions = {
@@ -511,58 +520,58 @@ const changeOrder = db.transaction((id,status,restock=false)=>{
     Refunded: []
   };
   if (!transitions[order.status]?.includes(status)) throw fail(409,`An order cannot move from ${order.status} to ${status}.`);
-  const items=db.prepare("SELECT * FROM order_items WHERE order_id=?").all(id);
+  const items=await tx.prepare("SELECT * FROM order_items WHERE order_id=?").all(id);
   const now=new Date().toISOString();
   if(status==="Confirmed"&&!order.reserved){
-    for(const item of items){const p=db.prepare("SELECT stock FROM products WHERE id=?").get(item.product_id);if(!p||p.stock<item.quantity)throw fail(409,`There is not enough stock for ${item.name}. Adjust inventory before confirming.`);}
-    for(const item of items){db.prepare("UPDATE products SET stock=stock-?,updated_at=? WHERE id=?").run(item.quantity,now,item.product_id);db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,reference,created_at) VALUES (?,?,?,?,?,?)").run(item.product_id,item.sku,-item.quantity,"Order stock reservation",id,now);}
+    for(const item of items){const p=await tx.prepare("SELECT stock FROM products WHERE id=?").get(item.product_id);if(!p||p.stock<item.quantity)throw fail(409,`There is not enough stock for ${item.name}. Adjust inventory before confirming.`);}
+    for(const item of items){await tx.prepare("UPDATE products SET stock=stock-?,updated_at=? WHERE id=?").run(item.quantity,now,item.product_id);await tx.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,reference,created_at) VALUES (?,?,?,?,?,?)").run(item.product_id,item.sku,-item.quantity,"Order stock reservation",id,now);}
   }
-  if(status==="Cancelled"&&order.reserved){for(const item of items){db.prepare("UPDATE products SET stock=stock+?,updated_at=? WHERE id=?").run(item.quantity,now,item.product_id);db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,reference,created_at) VALUES (?,?,?,?,?,?)").run(item.product_id,item.sku,item.quantity,"Cancelled order stock returned",id,now);}}
+  if(status==="Cancelled"&&order.reserved){for(const item of items){await tx.prepare("UPDATE products SET stock=stock+?,updated_at=? WHERE id=?").run(item.quantity,now,item.product_id);await tx.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,reference,created_at) VALUES (?,?,?,?,?,?)").run(item.product_id,item.sku,item.quantity,"Cancelled order stock returned",id,now);}}
   if(status==="Refunded"){
-    db.prepare("UPDATE orders SET payment_status='Refunded' WHERE id=?").run(id);
+    await tx.prepare("UPDATE orders SET payment_status='Refunded' WHERE id=?").run(id);
     if(restock){
       for(const item of items){
-        db.prepare("UPDATE products SET stock=stock+?,updated_at=? WHERE id=?").run(item.quantity,now,item.product_id);
-        db.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,reference,created_at) VALUES (?,?,?,?,?,?)").run(item.product_id,item.sku,item.quantity,"Refunded order returned to stock",id,now);
+        await tx.prepare("UPDATE products SET stock=stock+?,updated_at=? WHERE id=?").run(item.quantity,now,item.product_id);
+        await tx.prepare("INSERT INTO stock_movements (product_id,sku,change_quantity,reason,reference,created_at) VALUES (?,?,?,?,?,?)").run(item.product_id,item.sku,item.quantity,"Refunded order returned to stock",id,now);
       }
     }
   }
   const reserved = ["Confirmed","Processing","Shipped","Delivered"].includes(status)
     ? (order.reserved || status === "Confirmed" ? 1 : 0)
     : 0;
-  db.prepare("UPDATE orders SET status=?,reserved=? WHERE id=?").run(status,reserved,id);
-  return db.prepare("SELECT * FROM orders WHERE id=?").get(id);
-});
-app.patch("/api/admin/orders/:id",requireOwner,requirePermission("orders.update"),(req,res,next)=>{try{const {status,restock}=validate(z.object({status:z.enum(orderStatuses),restock:z.boolean().optional().default(false)}).strict(),req.body);if(restock&&status!=="Refunded")throw fail(400,"Only refunded orders can be returned to inventory.");res.json({order:presentAdminOrder(changeOrder(req.params.id,status,restock),req.admin.role)});}catch(e){next(e);}});
+  await tx.prepare("UPDATE orders SET status=?,reserved=? WHERE id=?").run(status,reserved,id);
+  return tx.prepare("SELECT * FROM orders WHERE id=?").get(id);
+})();
+app.patch("/api/admin/orders/:id",requireOwner,requirePermission("orders.update"),async(req,res,next)=>{try{const {status,restock}=validate(z.object({status:z.enum(orderStatuses),restock:z.boolean().optional().default(false)}).strict(),req.body);if(restock&&status!=="Refunded")throw fail(400,"Only refunded orders can be returned to inventory.");res.json({order:await presentAdminOrder(await changeOrder(req.params.id,status,restock),req.admin.role)});}catch(e){next(e);}});
 
-app.get("/api/admin/expenses",requireOwner,requirePermission("expenses.read"),(req,res)=>{const rows=db.prepare("SELECT * FROM expenses ORDER BY date DESC,id DESC LIMIT 500").all().map(r=>({id:r.id,category:r.category,amount:paiseToRupees(r.amount_paise),description:r.description,reference:r.reference,date:r.date}));res.json({expenses:rows});});
+app.get("/api/admin/expenses",requireOwner,requirePermission("expenses.read"),async(req,res)=>{const rows=(await db.prepare("SELECT * FROM expenses ORDER BY date DESC,id DESC LIMIT 500").all()).map(r=>({id:r.id,category:r.category,amount:paiseToRupees(r.amount_paise),description:r.description,reference:r.reference,date:r.date}));res.json({expenses:rows});});
 const expenseInput=z.object({category:z.enum(["Rent","Salaries","Advertising","Packaging","Shipping","Utilities","Payment fees","Website","Miscellaneous"]),amount:z.number().finite().positive().max(100000000),description:z.string().trim().min(1).max(300),reference:z.string().max(120).optional().default(""),date:isoDate}).strict();
-app.post("/api/admin/expenses",requireOwner,requirePermission("expenses.write"),(req,res,next)=>{try{const x=validate(expenseInput,req.body);const result=db.prepare("INSERT INTO expenses (category,amount_paise,description,reference,date,created_at) VALUES (?,?,?,?,?,?)").run(x.category,moneyToPaise(x.amount),x.description,x.reference,x.date,new Date().toISOString());res.status(201).json({expense:{id:result.lastInsertRowid,...x}});}catch(e){next(e);}});
-app.get("/api/admin/stock-movements",requireOwner,requirePermission("inventory.read"),(req,res)=>{const movements=db.prepare("SELECT id,product_id AS productId,sku,change_quantity AS changeQuantity,reason,reference,created_at AS createdAt FROM stock_movements ORDER BY created_at DESC LIMIT 500").all();res.json({movements});});
+app.post("/api/admin/expenses",requireOwner,requirePermission("expenses.write"),async(req,res,next)=>{try{const x=validate(expenseInput,req.body);const result=await db.prepare("INSERT INTO expenses (category,amount_paise,description,reference,date,created_at) VALUES (?,?,?,?,?,?)").run(x.category,moneyToPaise(x.amount),x.description,x.reference,x.date,new Date().toISOString());res.status(201).json({expense:{id:result.lastInsertRowid,...x}});}catch(e){next(e);}});
+app.get("/api/admin/stock-movements",requireOwner,requirePermission("inventory.read"),async(req,res)=>{const movements=await db.prepare("SELECT id,product_id AS productId,sku,change_quantity AS changeQuantity,reason,reference,created_at AS createdAt FROM stock_movements ORDER BY created_at DESC LIMIT 500").all();res.json({movements});});
 
-app.get("/api/admin/users", requireOwner, requirePermission("admins.read"), (req, res) => {
-  const users = db.prepare("SELECT id,email,role,is_active AS active,mfa_enabled AS mfaEnabled,created_at AS createdAt FROM users ORDER BY id").all();
+app.get("/api/admin/users", requireOwner, requirePermission("admins.read"), async (req, res) => {
+  const users = await db.prepare("SELECT id,email,role,is_active AS active,mfa_enabled AS mfaEnabled,created_at AS createdAt FROM users ORDER BY id").all();
   res.json({ users });
 });
 // Allow only Super Admins to issue one-use invitations and manage staff accounts.
-app.post("/api/admin/invitations", requireOwner, requireSuperAdmin, (req, res, next) => {
+app.post("/api/admin/invitations", requireOwner, requireSuperAdmin, async (req, res, next) => {
   try {
     const data = validate(z.object({
       email: z.string().email().max(254).transform((value) => value.toLowerCase()),
       role: z.enum(["admin", "staff"])
     }).strict(), req.body);
-    if (db.prepare("SELECT 1 FROM users WHERE email=?").get(data.email)) throw fail(409, "An account already exists for that email.");
+    if (await db.prepare("SELECT 1 FROM users WHERE email=?").get(data.email)) throw fail(409, "An account already exists for that email.");
     const token = crypto.randomBytes(32).toString("hex");
     const id = crypto.randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
-    db.prepare(`INSERT INTO admin_invitations
+    await db.prepare(`INSERT INTO admin_invitations
       (id,email,role,token_hash,expires_at,created_by,created_at) VALUES (?,?,?,?,?,?,?)`)
       .run(id, data.email, data.role, sha256(token), expiresAt, req.admin.id, now.toISOString());
     res.status(201).json({ invitation: { email: data.email, role: data.role, expiresAt, url: `/admin/invite?token=${token}` } });
   } catch (error) { next(error); }
 });
-app.patch("/api/admin/users/:id", requireOwner, requireSuperAdmin, (req, res, next) => {
+app.patch("/api/admin/users/:id", requireOwner, requireSuperAdmin, async (req, res, next) => {
   try {
     const id = idNumber.parse(req.params.id);
     const input = validate(z.object({
@@ -572,40 +581,40 @@ app.patch("/api/admin/users/:id", requireOwner, requireSuperAdmin, (req, res, ne
     if (id === req.admin.id && (input.active === false || (input.role && input.role !== "super_admin"))) {
       throw fail(400, "You cannot disable or demote your own Super Admin account.");
     }
-    const user = db.prepare("SELECT id,role,is_active FROM users WHERE id=?").get(id);
+    const user = await db.prepare("SELECT id,role,is_active FROM users WHERE id=?").get(id);
     if (!user) throw fail(404, "This account could not be found.");
     if (user.role === "super_admin" && user.is_active &&
         (input.role && input.role !== "super_admin" || input.active === false)) {
-      const otherSuperAdmins = db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='super_admin' AND is_active=1 AND id!=?")
-        .get(id).count;
-      if (!otherSuperAdmins) throw fail(409, "At least one active Super Admin account must remain.");
+      const { count: otherSuperAdmins } = await db.prepare("SELECT COUNT(*) AS count FROM users WHERE role='super_admin' AND is_active=1 AND id!=?")
+        .get(id);
+      if (Number(otherSuperAdmins) === 0) throw fail(409, "At least one active Super Admin account must remain.");
     }
-    const updated = db.prepare("UPDATE users SET role=COALESCE(?,role),is_active=COALESCE(?,is_active) WHERE id=?")
+    const updated = await db.prepare("UPDATE users SET role=COALESCE(?,role),is_active=COALESCE(?,is_active) WHERE id=?")
       .run(input.role || null, input.active === undefined ? null : Number(input.active), id);
-    if (input.active === false) db.prepare("DELETE FROM sessions WHERE user_id=?").run(id);
+    if (input.active === false) await db.prepare("DELETE FROM sessions WHERE user_id=?").run(id);
     res.json({ updated: updated.changes === 1 });
   } catch (error) { next(error); }
 });
 
 // Serve the private studio pages only after IP, session, and MFA checks pass.
-app.get("/admin", (req, res) => {
+app.get("/admin", async (req, res) => {
   if (!adminIpAllowed(req)) return hidden(res);
-  const session = getSession(req);
+  const session = await getSession(req);
   if (!sessionValid(session) || !session.mfa_enabled || !session.mfa_verified ||
       !["super_admin", "admin", "staff"].includes(session.role)) return hidden(res);
   res.set("Cache-Control", "no-store").sendFile(require("node:path").join(ADMIN_DIR, "index.html"));
 });
-app.get("/admin/login", (req, res) => {
+app.get("/admin/login", async (req, res) => {
   if (!adminIpAllowed(req)) return hidden(res);
-  const session = getSession(req);
+  const session = await getSession(req);
   if (sessionValid(session)) {
     return res.redirect(session.mfa_enabled && session.mfa_verified ? "/admin" : "/admin/mfa-setup");
   }
   res.set("Cache-Control", "no-store").sendFile(require("node:path").join(ADMIN_DIR, "login.html"));
 });
-app.get("/admin/mfa-setup", (req, res) => {
+app.get("/admin/mfa-setup", async (req, res) => {
   if (!adminIpAllowed(req)) return hidden(res);
-  const session = getSession(req);
+  const session = await getSession(req);
   if (!sessionValid(session) || session.mfa_enabled || session.mfa_verified) return hidden(res);
   res.set("Cache-Control", "no-store").sendFile(require("node:path").join(ADMIN_DIR, "mfa-setup.html"));
 });
@@ -625,4 +634,4 @@ app.use((error,req,res,next)=>{if(res.headersSent)return next(error);if(error.co
 const port=Number(process.env.PORT)||3000;
 // Start listening only when invoked directly; tests import the configured Express app.
 if(require.main===module){app.listen(port,()=>console.log(`SR CLOTHING is ready at http://localhost:${port} · database: ${process.env.DB_PATH||"./data/sr-clothing.sqlite"}`));}
-module.exports={app,db};
+module.exports = { app, databaseReady };

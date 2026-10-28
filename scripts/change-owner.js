@@ -2,7 +2,7 @@
 
 require("dotenv").config();
 const readline = require("node:readline");
-const { initializeDatabase } = require("../src/database");
+const { createRuntimeDatabase } = require("../src/runtime-database");
 const { changeOwnerCredentials } = require("../src/admin-credentials");
 
 // Read the email visibly but keep the replacement password out of terminal echo.
@@ -53,7 +53,7 @@ function askHidden(question) {
     const password = await askHidden("New password (at least 12 characters): ");
     const confirmation = await askHidden("Confirm new password: ");
     if (password !== confirmation) throw new Error("The passwords do not match.");
-    db = initializeDatabase();
+    db = await createRuntimeDatabase();
     const result = await changeOwnerCredentials(db, { email, password });
     console.log(`Super Admin credentials updated for ${result.email}. Sign in with the new email, password, and existing authenticator.`);
   } catch (error) {
@@ -61,7 +61,7 @@ function askHidden(question) {
     console.error(`Super Admin credentials were not updated: ${error.message}`);
     process.exitCode = 1;
   } finally {
-    db?.close();
+    await db?.close();
     input.close();
   }
 })();

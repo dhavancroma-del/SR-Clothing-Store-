@@ -12,22 +12,24 @@ process.env.ADMIN_MFA_ENCRYPTION_KEY = "3a".repeat(32);
 
 const { changeOwnerCredentials } = require("../src/admin-credentials");
 const { hashPassword, verifyPassword } = require("../src/admin-security");
-const db = require("../src/database").initializeDatabase();
+const { createRuntimeDatabase } = require("../src/runtime-database");
+let db;
 let ownerId;
 
-after(() => {
-  db.close();
+after(async () => {
+  await db?.close();
   fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
 test("owner credential changes update the email and password and revoke sessions", async () => {
+  db = await createRuntimeDatabase();
   const passwordHash = await hashPassword("initial-owner-password");
   const now = new Date().toISOString();
-  ownerId = Number(db.prepare(`INSERT INTO users
+  ownerId = Number((await db.prepare(`INSERT INTO users
     (email,password_hash,password_salt,role,is_active,mfa_secret,mfa_enabled,created_at)
     VALUES (? ,?,'','super_admin',1,'encrypted-mfa-secret',1,?)`)
-    .run("owner@example.test", passwordHash, now).lastInsertRowid);
-  db.prepare(`INSERT INTO sessions
+    .run("owner@example.test", passwordHash, now)).lastInsertRowid);
+  await db.prepare(`INSERT INTO sessions
     (token_hash,user_id,expires_at,last_activity_at,csrf_token,mfa_verified)
     VALUES ('old-session',?,?,?,'csrf',1)`)
     .run(ownerId, new Date(Date.now() + 3600000).toISOString(), now);
@@ -38,13 +40,13 @@ test("owner credential changes update the email and password and revoke sessions
   });
 
   assert.equal(result.email, "updated-owner@example.test");
-  const owner = db.prepare("SELECT * FROM users WHERE id=?").get(ownerId);
+  const owner = await db.prepare("SELECT * FROM users WHERE id=?").get(ownerId);
   assert.equal(owner.email, result.email);
   assert.equal(owner.password_salt, "");
   assert.equal(owner.mfa_secret, "encrypted-mfa-secret");
   assert.equal(owner.mfa_enabled, 1);
   assert.equal(await verifyPassword("a-new-owner-password", owner.password_hash), true);
-  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE user_id=?").get(ownerId).count, 0);
+  assert.equal((await db.prepare("SELECT COUNT(*) AS count FROM sessions WHERE user_id=?").get(ownerId)).count, 0);
 });
 
 test("owner credential changes reject invalid input and ambiguous owner accounts", async () => {
@@ -58,7 +60,7 @@ test("owner credential changes reject invalid input and ambiguous owner accounts
   );
 
   const passwordHash = await hashPassword("second-owner-password");
-  db.prepare(`INSERT INTO users (email,password_hash,password_salt,role,is_active,created_at)
+  await db.prepare(`INSERT INTO users (email,password_hash,password_salt,role,is_active,created_at)
     VALUES (? ,?,'','super_admin',1,?)`).run("second-owner@example.test", passwordHash, new Date().toISOString());
   await assert.rejects(
     changeOwnerCredentials(db, { email: "new@example.test", password: "a-new-owner-password" }),

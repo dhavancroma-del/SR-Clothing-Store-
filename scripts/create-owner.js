@@ -2,7 +2,7 @@
 
 require("dotenv").config();
 const readline = require("node:readline");
-const { initializeDatabase } = require("../src/database");
+const { createRuntimeDatabase } = require("../src/runtime-database");
 const { hashPassword } = require("../src/admin-security");
 
 // Use one readline interface for prompts and password entry.
@@ -45,6 +45,7 @@ function askHidden(question) {
 }
 
 (async () => {
+  let db;
   try {
     // Validate the initial owner credentials before creating the first account.
     const email = (await ask("Owner email: ")).trim().toLowerCase();
@@ -55,24 +56,24 @@ function askHidden(question) {
     if (password.length < 12 || Buffer.byteLength(password, "utf8") > 72) {
       throw new Error("Choose a password with at least 12 characters and no more than 72 UTF-8 bytes.");
     }
-    const db = initializeDatabase();
+    db = await createRuntimeDatabase();
     // Registration is intentionally disabled once any account exists.
-    if (db.prepare("SELECT 1 FROM users LIMIT 1").get()) {
+    if (await db.prepare("SELECT 1 FROM users LIMIT 1").get()) {
       throw new Error("An owner account already exists. Account self-registration is disabled.");
     }
     const hash = await hashPassword(password);
-    db.prepare(`INSERT INTO users
+    await db.prepare(`INSERT INTO users
       (email, password_hash, password_salt, role, is_active, created_at)
       VALUES (?, ?, '', 'super_admin', 1, ?)`).run(
       email, hash, new Date().toISOString()
     );
     console.log(`Super Admin account created for ${email}. Sign in to enroll an authenticator before using the panel.`);
-    db.close();
   } catch (error) {
     // Return a failing process status so deployment scripts can detect setup errors.
     console.error(`Owner account not created: ${error.message}`);
     process.exitCode = 1;
   } finally {
+    await db?.close();
     input.close();
   }
 })();

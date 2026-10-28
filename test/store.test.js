@@ -25,7 +25,9 @@ let cookie;
 let csrfToken;
 
 before(async () => {
-  ({ app, db } = require("../server"));
+  const server = require("../server");
+  app = server.app;
+  db = await server.databaseReady;
   database = require("../src/database").initializeDatabase();
   const hash = await hashPassword("correct-horse-battery-staple");
   const secret = makeTotpSecret();
@@ -46,7 +48,7 @@ after(async () => {
     await new Promise((resolve) => http.close(resolve));
   }
   database?.close();
-  db?.close();
+  await db?.close();
   fs.rmSync(scratch, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 

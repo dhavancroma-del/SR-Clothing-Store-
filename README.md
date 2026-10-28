@@ -23,9 +23,23 @@ The GitHub Actions workflow in `.github/workflows/deploy-pages.yml` automaticall
 
 GitHub Pages only hosts static files. It does **not** run the Node.js API, accept real orders, save owner changes, or serve the admin panel. Use the Render deployment below for the full application with persistent storage. Do not accept real orders through the static preview.
 
-## Publish a static preview on Vercel
+## Publish the full store and admin panel on Vercel
 
-The `vercel.json` configuration publishes only the files in `public/`, so Vercel serves the storefront instead of trying to run the SQLite-backed Node.js server as a serverless function. Import this repository into Vercel and deploy the `main` branch, or push a new commit to trigger a deployment for an already connected project. This is a static preview: the live catalog API, checkout, and private admin panel require the full Render service described below.
+Vercel runs the Express API and guarded `/admin` pages as a Node.js Function. The customer-facing files remain static, while the database is stored in Turso because a Vercel Function cannot persist a local SQLite file between requests.
+
+1. Create a Turso database and an authentication token. Keep the token private.
+2. Import this repository into Vercel and deploy it with the repository root as the project root.
+3. Add these Vercel environment variables for Production and Preview:
+   - `TURSO_DATABASE_URL` — the database's `libsql://...` URL.
+   - `TURSO_AUTH_TOKEN` — the Turso token for that database.
+   - `ADMIN_MFA_ENCRYPTION_KEY` — a private, stable, 64-character hexadecimal key. Generate one with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` and back it up securely.
+4. By default, the app uses Vercel's deployment URL as its exact trusted origin, including for preview deployments. If Production uses a custom domain, set `APP_ORIGIN` to that exact HTTPS origin (for example `https://shop.example.com`) in the **Production** environment only. Leave it unset for Preview so each preview uses its own Vercel URL.
+5. From a trusted local terminal, configure `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and the same `ADMIN_MFA_ENCRYPTION_KEY` in `.env`, then run `npm run create-owner`. This provisions the initial Super Admin directly in Turso; there is no public registration or owner-creation endpoint. Keep `.env` out of Git.
+6. Open `/admin/login` on the deployed site and enroll an authenticator on first sign-in. Test storefront, login, and an admin-managed catalog update before using the store with customers.
+
+The function initializes the Turso schema on first use and applies additive migrations. Vercel deployments require the Turso variables; they will not silently fall back to ephemeral SQLite. `npm run change-owner -- your-new-admin@example.com` can update the owner from a trusted local terminal using the same Turso credentials; enter the replacement password only at the hidden prompt. Existing sessions are revoked, and the current MFA enrollment is retained.
+
+The database and application must use a stable `ADMIN_MFA_ENCRYPTION_KEY`; changing or losing it prevents decrypting enrolled MFA secrets. Use Vercel's separate Production and Preview environment scopes, and never put database tokens or owner passwords in source control. For an SQLite-based full deployment, use the Render option below instead.
 
 ## Publish on Render
 
