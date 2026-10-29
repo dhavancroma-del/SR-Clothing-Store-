@@ -381,6 +381,16 @@ app.get("/api/products", async (req, res) => {
   const products = (await db.prepare("SELECT * FROM products WHERE status='Active' AND stock>0 ORDER BY id DESC").all()).map(storefrontProduct);
   res.json({ products });
 });
+app.get("/api/product-images/:id", async (req, res) => {
+  const image = await db.prepare("SELECT content_type,image_data FROM product_images WHERE id=?")
+    .get(idNumber.parse(req.params.id));
+  if (!image) return res.status(404).send("Image not found");
+  res.set({
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Content-Type": image.content_type,
+    "X-Content-Type-Options": "nosniff"
+  }).send(Buffer.from(image.image_data));
+});
 
 const createOrderBody = z.object({
   customerName: z.string().trim().min(2).max(120),
@@ -469,6 +479,28 @@ app.get("/api/admin/overview", requireOwner, requirePermission("reports.read"), 
 
 app.get("/api/admin/products", requireOwner, requirePermission("products.read"), async (req, res) => {
   res.json({ products: (await ownerProductQuery()).map((p) => ({ ...publicProduct(p), status: p.status })) });
+});
+app.post("/api/admin/product-images", requireOwner, requirePermission("products.write"), express.raw({
+  type: ["image/jpeg", "image/png", "image/webp"],
+  limit: "5mb"
+}), async (req, res, next) => {
+  try {
+    const contentType = req.get("content-type")?.split(";")[0].trim().toLowerCase();
+    const image = req.body;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(contentType) || !Buffer.isBuffer(image)) {
+      throw fail(415, "Choose a JPEG, PNG, or WebP image.");
+    }
+    if (!image.length) throw fail(400, "The selected image is empty.");
+    const validSignature = contentType === "image/jpeg"
+      ? image[0] === 0xff && image[1] === 0xd8 && image[2] === 0xff
+      : contentType === "image/png"
+        ? image.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+        : image.subarray(0, 4).toString("ascii") === "RIFF" && image.subarray(8, 12).toString("ascii") === "WEBP";
+    if (!validSignature) throw fail(400, "The selected file does not match its image format.");
+    const result = await db.prepare("INSERT INTO product_images (content_type,image_data,created_at) VALUES (?,?,?)")
+      .run(contentType, image, new Date().toISOString());
+    res.status(201).json({ image: `/api/product-images/${result.lastInsertRowid}` });
+  } catch (error) { next(error); }
 });
 const productInput = z.object({
   name:z.string().trim().min(1).max(120), sku:z.string().trim().min(1).max(40),

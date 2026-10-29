@@ -1,6 +1,6 @@
 # SR CLOTHING
 
-A responsive independent-fashion storefront and a SQLite-backed Node.js API. The administration panel is served only by the Express application at `/admin`; its HTML is stored outside the public web root. The static storefront contains no dashboard or public admin-registration page.
+A responsive independent-fashion storefront and a SQLite-backed Node.js API. A standalone administration panel is served only by the Express application at `/admin`; its HTML is stored outside the public web root and connects to the existing protected business APIs. The static storefront contains no dashboard or public admin-registration page.
 
 ## Run on a computer with Node.js 20+
 
@@ -13,7 +13,7 @@ npm run create-owner
 npm start
 ```
 
-Open http://localhost:3000 for the storefront. The admin sign-in entry is hidden behind five quick clicks on either SR logo; the panel still requires an invited account, password, and authenticator code. The first Super Admin is created by the CLI and must enroll an authenticator before entering the panel. Keep `ADMIN_MFA_ENCRYPTION_KEY` private, stable, and separately backed up: losing it prevents decrypting enrolled MFA secrets. Set the exact trusted `APP_ORIGIN`; keep the SQLite database and `.env` private, and serve production behind HTTPS. Admin sessions expire after 20 minutes idle or 8 hours absolute.
+Open http://localhost:3000 for the storefront; use the Express app server rather than VS Code Live Server so product changes and uploads use the same API and database as Admin. Use **Staff sign in** in the footer to open `/admin/login`; the panel still requires an invited account, password, and authenticator code. In Admin, choose a JPEG, PNG, or WebP product image up to 5 MB from your device; uploaded images are stored in the configured database. The first Super Admin is created by the CLI and must enroll an authenticator before entering the panel. Keep `ADMIN_MFA_ENCRYPTION_KEY` private, stable, and separately backed up: losing it prevents decrypting enrolled MFA secrets. Set the exact trusted `APP_ORIGIN`; keep the SQLite database and `.env` private, and serve production behind HTTPS. Admin sessions expire after 20 minutes idle or 8 hours absolute.
 
 To change the single active Super Admin's email and password, run `npm run change-owner -- your-new-admin@example.com` in an interactive terminal on the machine hosting the database (or the Render Shell for a deployed database). Enter and confirm the new password at the hidden prompts; do not pass it as a command argument or share it in chat. The operation retains the existing authenticator enrollment and signs out all current sessions. Sign in again with the new email, password, and existing authenticator code.
 

@@ -9,6 +9,26 @@
     ? new URLSearchParams(window.location.search).get("token") || ""
     : "";
   if (invitationToken) window.history.replaceState(null, "", "/admin/invite");
+  const rateLimitMessage = "Too many attempts. Please wait 15 minutes before trying again.";
+  const readResponse = async (response, fallback) => {
+    if (response.status === 204) return null;
+    const contentType = response.headers.get("content-type") || "";
+    let data = null;
+    if (contentType.includes("application/json")) {
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(fallback);
+      }
+    } else {
+      await response.text();
+    }
+    if (!response.ok) {
+      throw new Error(data?.error || (response.status === 429 ? rateLimitMessage : fallback));
+    }
+    if (!contentType.includes("application/json")) throw new Error(fallback);
+    return data;
+  };
   const send = async (path, body, csrfToken) => {
     // Keep requests same-origin and attach the one-time CSRF token when required.
     const response = await fetch(`/api${path}`, {
@@ -20,9 +40,7 @@
       },
       body: JSON.stringify(body)
     });
-    const data = response.status === 204 ? null : await response.json();
-    if (!response.ok) throw new Error(data?.error || "Unable to complete sign in.");
-    return data;
+    return readResponse(response, "Unable to complete sign in.");
   };
   const showError = (reason) => { error.textContent = reason.message; };
 
@@ -48,8 +66,7 @@
     let csrfToken = "";
     fetch("/api/auth/mfa/setup", { credentials: "same-origin" })
       .then(async (response) => {
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || "Unable to load authenticator setup.");
+        const data = await readResponse(response, "Unable to load authenticator setup.");
         csrfToken = data.csrfToken;
         document.getElementById("mfa-secret").textContent = data.secret;
       })

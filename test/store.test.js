@@ -67,7 +67,8 @@ test("private catalog, variant checkout, stock transitions, refund, and profit s
   const publicPage = await fetch(base + "/");
   assert.equal(publicPage.status, 200);
   const storefront = await publicPage.text();
-  assert.doesNotMatch(storefront, /id="admin-view"|THE STUDIO|href=["']\/admin/);
+  assert.doesNotMatch(storefront, /id="admin-view"|THE STUDIO|href=["']\/admin["']/);
+  assert.match(storefront, /href=["']\/admin\/login["'][^>]*>Staff sign in<\/a>/);
   assert.equal((storefront.match(/data-admin-entry/g) || []).length, 2);
   assert.equal((await call("/admin")).response.status, 404);
   assert.equal((await call("/admin/login")).response.status, 200);
@@ -93,6 +94,18 @@ test("private catalog, variant checkout, stock transitions, refund, and profit s
   cookie = goodLogin.response.headers.get("set-cookie")?.split(";")[0];
   csrfToken = goodLogin.data.csrfToken;
   assert.match(cookie || "", /^sr_owner=[a-f0-9]{64}$/);
+  const adminPage = await call("/admin", { owner: true });
+  assert.equal(adminPage.response.status, 200);
+  const adminHtml = await adminPage.response.text();
+  assert.match(adminHtml, /Business studio — SR CLOTHING/);
+  assert.match(adminHtml, /id="panel-content"/);
+  assert.doesNotMatch(adminHtml, /id="store-view"|class="hero"|src="\/app\.js"/);
+  const adminScript = await fetch(base + "/admin-panel.js");
+  assert.equal(adminScript.status, 200);
+  const adminScriptText = await adminScript.text();
+  assert.match(adminScriptText, /name="imageFile"/);
+  assert.match(adminScriptText, /\/api\/admin\/product-images/);
+  assert.equal((await fetch(base + "/admin-panel.css")).status, 200);
   const allowedIps = process.env.ADMIN_IP_ALLOWLIST;
   process.env.ADMIN_IP_ALLOWLIST = "192.0.2.1";
   assert.equal((await call("/api/admin/orders", { owner: true })).response.status, 404);
@@ -100,12 +113,42 @@ test("private catalog, variant checkout, stock transitions, refund, and profit s
 
   const csrfBlocked = await call("/api/admin/products", { method: "POST", owner: true, csrf: false, body: {} });
   assert.equal(csrfBlocked.response.status, 403);
+  assert.equal((await call("/api/admin/product-images", { method: "POST", body: {} })).response.status, 404);
+  const sampleImage = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jf5sAAAAASUVORK5CYII=", "base64");
+  const uploadedImage = await fetch(`${base}/api/admin/product-images`, {
+    method: "POST",
+    headers: {
+      origin,
+      cookie,
+      "content-type": "image/png",
+      "x-csrf-token": csrfToken
+    },
+    body: sampleImage
+  });
+  assert.equal(uploadedImage.status, 201);
+  const imagePath = (await uploadedImage.json()).image;
+  assert.match(imagePath, /^\/api\/product-images\/\d+$/);
+  const servedImage = await fetch(`${base}${imagePath}`);
+  assert.equal(servedImage.status, 200);
+  assert.equal(servedImage.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await servedImage.arrayBuffer()), sampleImage);
+  const invalidImage = await fetch(`${base}/api/admin/product-images`, {
+    method: "POST",
+    headers: {
+      origin,
+      cookie,
+      "content-type": "image/png",
+      "x-csrf-token": csrfToken
+    },
+    body: Buffer.from("not an image")
+  });
+  assert.equal(invalidImage.status, 400);
 
   const created = await call("/api/admin/products", {
     method: "POST", owner: true,
     body: {
       sku: "SR-TEST-001", name: "Test cotton shirt", category: "Men",
-      description: "A test-only product", image: "", cost: 500, price: 800,
+      description: "A test-only product", image: imagePath, cost: 500, price: 800,
       stock: 10, minStock: 5, sizes: ["S", "M", "L"], colors: ["#111111"]
     }
   });
@@ -115,6 +158,7 @@ test("private catalog, variant checkout, stock transitions, refund, and profit s
   const publicProduct = await call("/api/products");
   const [listed] = publicProduct.data.products;
   assert.equal(listed.id, productId);
+  assert.equal(listed.image, imagePath);
   assert.equal("cost" in listed, false);
   assert.equal("supplier" in listed, false);
   assert.equal("minStock" in listed, false);
